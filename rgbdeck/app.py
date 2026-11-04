@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """RGB Deck - standalone lighting control for your keyboard, mouse and motherboard (direct hidraw)."""
+
 from __future__ import annotations
 
 import colorsys
@@ -10,22 +11,69 @@ import os
 import random
 import socket
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSocketNotifier, Qt, QTimer, Signal
-from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient, QFont, QFontMetrics, QIcon, QKeySequence,
-                           QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen,
-                           QRadialGradient, QShortcut)
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFormLayout,
-                               QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
-                               QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
-                               QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtGui import (
+    QAction,
+    QBrush,
+    QColor,
+    QConicalGradient,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QKeySequence,
+    QLinearGradient,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QRadialGradient,
+    QShortcut,
+)
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QSystemTrayIcon,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
-from rgbdeck.models import (Device, Mode, DeviceError, MODE_COLORS_MODE_SPECIFIC, MODE_COLORS_PER_LED,  # noqa: E402
-                    MODE_COLORS_RANDOM, DIRECTION_NAMES, rgb_to_u32, u32_to_rgb)
+from rgbdeck.models import (
+    Device,
+    Mode,
+    DeviceError,
+    MODE_COLORS_MODE_SPECIFIC,
+    MODE_COLORS_PER_LED,  # noqa: E402
+    MODE_COLORS_RANDOM,
+    DIRECTION_NAMES,
+    rgb_to_u32,
+    u32_to_rgb,
+)
 from rgbdeck.backend import LocalBackend  # noqa: E402
+from rgbdeck import __version__  # noqa: E402
 
 log = logging.getLogger("rgbdeck")
 LOG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "rgbdeck" / "rgbdeck.log"
@@ -37,8 +85,13 @@ def setup_logging(verbose: bool):
     handlers = [logging.FileHandler(LOG_FILE)]
     if verbose:
         handlers.append(logging.StreamHandler())
-    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, handlers=handlers,
-                        format="%(asctime)s %(name)s %(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        handlers=handlers,
+        format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+    )
+
+
 from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
 from rgbdeck.effects import EffectEngine, EffectSettings, KeyListener, find_keyboard_events  # noqa: E402
 
@@ -46,10 +99,12 @@ APP_NAME = "RGB Deck"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "rgbdeck"
 PRESETS_FILE = CONFIG_DIR / "presets.json"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
-AUTOSTART_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "autostart" / "rgbdeck-apply.desktop"
+AUTOSTART_FILE = (
+    Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "autostart" / "rgbdeck-apply.desktop"
+)
 
 ACCENT = "#7c6cff"
-CONTROL_SOCKET = "\0rgbdeck-" + str(os.getuid())     # abstract unix socket: one running instance per user
+CONTROL_SOCKET = "\0rgbdeck-" + str(os.getuid())  # abstract unix socket: one running instance per user
 
 
 def send_control(cmd: str) -> Optional[str]:
@@ -62,11 +117,38 @@ def send_control(cmd: str) -> Optional[str]:
             return sk.recv(4096).decode(errors="replace").strip()
     except OSError:
         return None
-DEFAULT_PALETTE = ["#ff2d55", "#ff6a00", "#ffc800", "#8cff00", "#00ff6a", "#00ffd0", "#00b4ff", "#2f5bff",
-                   "#8a2bff", "#e02bff", "#ff2bb0", "#ffffff", "#ff9d9d", "#9dffd0", "#9dcdff", "#d9b3ff"]
 
-ICONS = {"Keyboard": "⌨", "Mouse": "🖱", "Motherboard": "▣", "GPU": "▤", "DRAM": "▥", "Headset": "🎧",
-         "LED Strip": "〰", "Cooler": "❄", "Mousemat": "▭"}
+
+DEFAULT_PALETTE = [
+    "#ff2d55",
+    "#ff6a00",
+    "#ffc800",
+    "#8cff00",
+    "#00ff6a",
+    "#00ffd0",
+    "#00b4ff",
+    "#2f5bff",
+    "#8a2bff",
+    "#e02bff",
+    "#ff2bb0",
+    "#ffffff",
+    "#ff9d9d",
+    "#9dffd0",
+    "#9dcdff",
+    "#d9b3ff",
+]
+
+ICONS = {
+    "Keyboard": "⌨",
+    "Mouse": "🖱",
+    "Motherboard": "▣",
+    "GPU": "▤",
+    "DRAM": "▥",
+    "Headset": "🎧",
+    "LED Strip": "〰",
+    "Cooler": "❄",
+    "Mousemat": "▭",
+}
 
 QSS = f"""
 * {{ font-family: "Inter", "Noto Sans", "Segoe UI", sans-serif; font-size: 13px; color: #e8e9ee; }}
@@ -163,7 +245,7 @@ def device_colors_preview(dev: Device) -> List[int]:
 # Color wheel + panel
 # =============================================================================
 class ColorWheel(QWidget):
-    colorChanged = Signal(QColor, bool)   # live=True while dragging
+    colorChanged = Signal(QColor, bool)  # live=True while dragging
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -256,13 +338,16 @@ class Swatch(QToolButton):
         self._apply()
 
     def _apply(self):
-        self.setStyleSheet(f"QToolButton{{background:{self._color.name()};border:2px solid #0000;border-radius:7px;padding:0;}}"
-                           f"QToolButton:hover{{border:2px solid #fff;}}")
+        self.setStyleSheet(
+            f"QToolButton{{background:{self._color.name()};border:2px solid #0000;border-radius:7px;padding:0;}}"
+            f"QToolButton:hover{{border:2px solid #fff;}}"
+        )
         self.setToolTip(self._color.name().upper())
 
 
 class ColorPanel(QWidget):
     """Wheel + brightness + fine sliders + palette. colorChanged(QColor, live)."""
+
     colorChanged = Signal(QColor, bool)
 
     def __init__(self, parent=None):
@@ -303,7 +388,9 @@ class ColorPanel(QWidget):
         self.adv_btn = QToolButton()
         self.adv_btn.setText("▸ Fine tune (RGB / HSV)")
         self.adv_btn.setCheckable(True)
-        self.adv_btn.setStyleSheet("QToolButton{background:transparent;color:#9aa0b4;padding:2px;}QToolButton:hover{color:#fff;}")
+        self.adv_btn.setStyleSheet(
+            "QToolButton{background:transparent;color:#9aa0b4;padding:2px;}QToolButton:hover{color:#fff;}"
+        )
         self.adv_btn.toggled.connect(self._toggle_adv)
         lay.addWidget(self.adv_btn)
         self.adv = QWidget()
@@ -462,9 +549,9 @@ class LedCanvas(QWidget):
         self.geoms: List[KeyGeom] = []
         self.colors: List[int] = []
         self.selected: Set[int] = set()
-        self.mode = "device"      # device | paint | select
+        self.mode = "device"  # device | paint | select
         self.dev_type = ""
-        self.fallback_colors: List[int] = []   # for LED-less devices (mode colors)
+        self.fallback_colors: List[int] = []  # for LED-less devices (mode colors)
         self._drag_painted: Set[int] = set()
         self._rubber: Optional[QRect] = None
         self._press_pos = None
@@ -553,7 +640,7 @@ class LedCanvas(QWidget):
             p.setBrush(QColor("#2b2f3a"))
             p.drawPath(kp)
             if lum > 2:
-                p.setBrush(col)            # exact color you picked, no tint
+                p.setBrush(col)  # exact color you picked, no tint
                 p.drawPath(kp)
             if g.led in self.selected:
                 p.setPen(QPen(Qt.white, max(2.0, s * 0.07)))
@@ -579,7 +666,9 @@ class LedCanvas(QWidget):
         size = min(w, h) * 0.6
         if self.dev_type == "Mouse":
             body = QPainterPath()
-            body.addRoundedRect(QRectF(cx - size * 0.28, cy - size * 0.48, size * 0.56, size * 0.96), size * 0.26, size * 0.26)
+            body.addRoundedRect(
+                QRectF(cx - size * 0.28, cy - size * 0.48, size * 0.56, size * 0.96), size * 0.26, size * 0.26
+            )
         else:
             body = QPainterPath()
             body.addRoundedRect(QRectF(cx - size * 0.45, cy - size * 0.32, size * 0.9, size * 0.64), 18, 18)
@@ -613,8 +702,11 @@ class LedCanvas(QWidget):
             p.setPen(Qt.NoPen)
             p.drawRoundedRect(QRectF(cx - size * 0.035, cy - size * 0.36, size * 0.07, size * 0.14), 4, 4)
         p.setPen(QColor("#8d93a8"))
-        p.drawText(QRectF(0, cy + size * 0.52, w, 30), Qt.AlignCenter,
-                   "This device is lit by its effect — pick a color or an effect on the right.")
+        p.drawText(
+            QRectF(0, cy + size * 0.52, w, 30),
+            Qt.AlignCenter,
+            "This device is lit by its effect — pick a color or an effect on the right.",
+        )
 
     # interaction
     def mousePressEvent(self, e: QMouseEvent):
@@ -657,8 +749,12 @@ class LedCanvas(QWidget):
         if self._rubber is not None:
             self._rubber = QRect(self._press_pos, e.position().toPoint()).normalized()
             self.update()
-        elif e.buttons() & Qt.LeftButton and self._press_pos is not None and self.mode == "paint" \
-                and not (self._press_mods & (Qt.ControlModifier | Qt.ShiftModifier)):
+        elif (
+            e.buttons() & Qt.LeftButton
+            and self._press_pos is not None
+            and self.mode == "paint"
+            and not (self._press_mods & (Qt.ControlModifier | Qt.ShiftModifier))
+        ):
             if led is not None and led not in self._drag_painted:
                 self._drag_painted.add(led)
                 self.paintRequested.emit([led])
@@ -736,8 +832,11 @@ class DeviceTab(QToolButton):
         p.setFont(f)
         p.setPen(QColor("#9aa0b4"))
         fm = QFontMetrics(f)
-        p.drawText(QRectF(50, 25, self.width() - 60, 14), Qt.AlignVCenter | Qt.AlignLeft,
-                   fm.elidedText(f"{name} · {d.current_mode.name}", Qt.ElideRight, self.width() - 64))
+        p.drawText(
+            QRectF(50, 25, self.width() - 60, 14),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            fm.elidedText(f"{name} · {d.current_mode.name}", Qt.ElideRight, self.width() - 64),
+        )
         cols = device_colors_preview(d)
         x0, y0, wdt = 50, 45, self.width() - 64
         seg = wdt / max(1, len(cols))
@@ -767,13 +866,16 @@ class PresetCard(QToolButton):
         p.setFont(f)
         p.setPen(QColor("#e8e9ee"))
         fm = QFontMetrics(f)
-        p.drawText(QRectF(12, 8, self.width() - 24, 18), Qt.AlignVCenter | Qt.AlignLeft,
-                   fm.elidedText(("★ " if self.autostart else "") + self.name_, Qt.ElideRight, self.width() - 24))
+        p.drawText(
+            QRectF(12, 8, self.width() - 24, 18),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            fm.elidedText(("★ " if self.autostart else "") + self.name_, Qt.ElideRight, self.width() - 24),
+        )
         cols: List[int] = []
         for dv in self.snap.get("devices", []):
             if dv.get("colors"):
                 c = dv["colors"]
-                cols += c[::max(1, len(c) // 8)][:8]
+                cols += c[:: max(1, len(c) // 8)][:8]
             else:
                 am = dv.get("active_mode", 0)
                 modes = list(dv.get("modes", {}).values())
@@ -794,8 +896,8 @@ class PresetCard(QToolButton):
 # Effects panel
 # =============================================================================
 class EffectsPanel(QWidget):
-    changed = Signal()          # params changed -> UpdateMode
-    modePicked = Signal(Mode)   # user clicked an effect chip
+    changed = Signal()  # params changed -> UpdateMode
+    modePicked = Signal(Mode)  # user clicked an effect chip
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -823,10 +925,13 @@ class EffectsPanel(QWidget):
         ag.setContentsMargins(0, 0, 0, 0)
         ag.setSpacing(6)
         self.app_chips: Dict[str, QToolButton] = {}
-        for i, (kind, text, tip) in enumerate([
+        for i, (kind, text, tip) in enumerate(
+            [
                 ("ripple", "✦ Ripple", "Every key you press sends a ring of color rippling across the board"),
                 ("glow", "✦ Key glow", "Keys light up when pressed and fade back out"),
-                ("ripple+glow", "✦ Ripple + glow", "Both: the key lights up and a ring spreads from it")]):
+                ("ripple+glow", "✦ Ripple + glow", "Both: the key lights up and a ring spreads from it"),
+            ]
+        ):
             b = QToolButton()
             b.setObjectName("chip")
             b.setCheckable(True)
@@ -845,10 +950,16 @@ class EffectsPanel(QWidget):
         og.setVerticalSpacing(6)
         self.src_group = QButtonGroup(self)
         self.bg_group = QButtonGroup(self)
-        for row, (label, group, options) in enumerate([
-                ("Ripple color", self.src_group, [("active", "Active color"), ("rainbow", "Rainbow"),
-                                                  ("random", "Random"), ("key", "Contrast")]),
-                ("Under it", self.bg_group, [("colors", "My colors"), ("dim", "Dimmed"), ("black", "Black")])]):
+        for row, (label, group, options) in enumerate(
+            [
+                (
+                    "Ripple color",
+                    self.src_group,
+                    [("active", "Active color"), ("rainbow", "Rainbow"), ("random", "Random"), ("key", "Contrast")],
+                ),
+                ("Under it", self.bg_group, [("colors", "My colors"), ("dim", "Dimmed"), ("black", "Black")]),
+            ]
+        ):
             lbl = QLabel(label)
             lbl.setFixedWidth(84)
             og.addWidget(lbl, row, 0)
@@ -859,18 +970,29 @@ class EffectsPanel(QWidget):
                 b.setCheckable(True)
                 b.setText(text)
                 b.setProperty("val", val)
-                b.setStyleSheet(f"QToolButton{{border-radius:0;padding:5px 9px;background:#262a35;}}QToolButton:checked{{background:{ACCENT};font-weight:600;}}"
-                                + ("QToolButton{border-top-left-radius:8px;border-bottom-left-radius:8px;}" if i == 0 else "")
-                                + ("QToolButton{border-top-right-radius:8px;border-bottom-right-radius:8px;}" if i == len(options) - 1 else ""))
+                b.setStyleSheet(
+                    f"QToolButton{{border-radius:0;padding:5px 9px;background:#262a35;}}QToolButton:checked{{background:{ACCENT};font-weight:600;}}"
+                    + ("QToolButton{border-top-left-radius:8px;border-bottom-left-radius:8px;}" if i == 0 else "")
+                    + (
+                        "QToolButton{border-top-right-radius:8px;border-bottom-right-radius:8px;}"
+                        if i == len(options) - 1
+                        else ""
+                    )
+                )
                 b.clicked.connect(self._app_opts_changed)
                 group.addButton(b)
                 hb.addWidget(b)
             hb.addStretch(1)
             og.addLayout(hb, row, 1, 1, 2)
         self.app_sliders: Dict[str, QSlider] = {}
-        for row, (key, label, tip) in enumerate([("speed", "Speed", "How fast the ring travels"),
-                                                 ("size", "Ring size", "Thickness of the ring"),
-                                                 ("fade", "Glow time", "How long a pressed key stays lit")], start=2):
+        for row, (key, label, tip) in enumerate(
+            [
+                ("speed", "Speed", "How fast the ring travels"),
+                ("size", "Ring size", "Thickness of the ring"),
+                ("fade", "Glow time", "How long a pressed key stays lit"),
+            ],
+            start=2,
+        ):
             lbl = QLabel(label)
             lbl.setFixedWidth(84)
             sl = QSlider(Qt.Horizontal)
@@ -897,14 +1019,17 @@ class EffectsPanel(QWidget):
         g.setVerticalSpacing(6)
         self.speed_lbl, self.speed, self.speed_val = QLabel("Speed"), QSlider(Qt.Horizontal), QLabel("")
         self.bright_lbl, self.bright, self.bright_val = QLabel("Brightness"), QSlider(Qt.Horizontal), QLabel("")
-        for row, (lbl, sl, val) in enumerate([(self.speed_lbl, self.speed, self.speed_val),
-                                              (self.bright_lbl, self.bright, self.bright_val)]):
+        for row, (lbl, sl, val) in enumerate(
+            [(self.speed_lbl, self.speed, self.speed_val), (self.bright_lbl, self.bright, self.bright_val)]
+        ):
             lbl.setFixedWidth(72)
             val.setFixedWidth(30)
             val.setAlignment(Qt.AlignRight)
             sl.valueChanged.connect(lambda v, lab=val: lab.setText(str(v)))
             sl.sliderReleased.connect(self._param_changed)
-            sl.actionTriggered.connect(lambda a: None if a == QSlider.SliderMove else QTimer.singleShot(0, self._param_changed))
+            sl.actionTriggered.connect(
+                lambda a: None if a == QSlider.SliderMove else QTimer.singleShot(0, self._param_changed)
+            )
             g.addWidget(lbl, row, 0)
             g.addWidget(sl, row, 1)
             g.addWidget(val, row, 2)
@@ -932,7 +1057,9 @@ class EffectsPanel(QWidget):
 
         row = QHBoxLayout()
         self.save_btn = QPushButton("💾 Keep on device")
-        self.save_btn.setToolTip("Store the current effect in the device's own memory, so it stays even without this app")
+        self.save_btn.setToolTip(
+            "Store the current effect in the device's own memory, so it stays even without this app"
+        )
         row.addWidget(self.save_btn)
         self.all_btn = QPushButton("Same effect on all devices")
         row.addWidget(self.all_btn)
@@ -1002,8 +1129,20 @@ class EffectsPanel(QWidget):
     def _rebuild_params(self):
         self._building = True
         m = self.current_mode()
-        for w in (self.speed_lbl, self.speed, self.speed_val, self.bright_lbl, self.bright, self.bright_val,
-                  self.dir_lbl, self.dir_box, self.random, self.colors_lbl, self.colors_box, self.save_btn):
+        for w in (
+            self.speed_lbl,
+            self.speed,
+            self.speed_val,
+            self.bright_lbl,
+            self.bright,
+            self.bright_val,
+            self.dir_lbl,
+            self.dir_box,
+            self.random,
+            self.colors_lbl,
+            self.colors_box,
+            self.save_btn,
+        ):
             w.setVisible(False)
         for lay in (self.colors_row, self.dir_lay):
             while lay.count():
@@ -1036,9 +1175,15 @@ class EffectsPanel(QWidget):
             for i, d in enumerate(dirs):
                 b = QToolButton()
                 b.setObjectName("seg" if 0 < i < len(dirs) - 1 else ("segL" if i == 0 else "segR"))
-                b.setStyleSheet(f"QToolButton{{border-radius:0;padding:5px 10px;}}QToolButton:checked{{background:{ACCENT};}}"
-                                + ("QToolButton{border-top-left-radius:8px;border-bottom-left-radius:8px;}" if i == 0 else "")
-                                + ("QToolButton{border-top-right-radius:8px;border-bottom-right-radius:8px;}" if i == len(dirs) - 1 else ""))
+                b.setStyleSheet(
+                    f"QToolButton{{border-radius:0;padding:5px 10px;}}QToolButton:checked{{background:{ACCENT};}}"
+                    + ("QToolButton{border-top-left-radius:8px;border-bottom-left-radius:8px;}" if i == 0 else "")
+                    + (
+                        "QToolButton{border-top-right-radius:8px;border-bottom-right-radius:8px;}"
+                        if i == len(dirs) - 1
+                        else ""
+                    )
+                )
                 b.setCheckable(True)
                 b.setText(f"{arrows.get(d, '')} {DIRECTION_NAMES.get(d, d)}")
                 b.setChecked(d == m.direction)
@@ -1060,7 +1205,9 @@ class EffectsPanel(QWidget):
                 self.color_swatches.append(sw)
                 sw.clicked.connect(lambda _=False, k=i: self.requestColor.emit(k))
                 sw.setContextMenuPolicy(Qt.CustomContextMenu)
-                sw.customContextMenuRequested.connect(lambda _p, k=i: self.pickColor.emit(u32_to_qcolor(self.current_mode().colors[k])))
+                sw.customContextMenuRequested.connect(
+                    lambda _p, k=i: self.pickColor.emit(u32_to_qcolor(self.current_mode().colors[k]))
+                )
                 self.colors_row.addWidget(sw)
             if len(m.colors) < m.colors_max:
                 add = QToolButton()
@@ -1077,7 +1224,9 @@ class EffectsPanel(QWidget):
             self.colors_row.addStretch(1)
         self.save_btn.setVisible(m.can_save)
         if m.has_per_led:
-            self.info.setText("Every key has its own color here. Use Paint / Select above the keyboard for detail work.")
+            self.info.setText(
+                "Every key has its own color here. Use Paint / Select above the keyboard for detail work."
+            )
         elif not (m.has_speed or m.has_brightness or dirs or m.has_mode_colors):
             self.info.setText("This effect has no settings.")
         else:
@@ -1222,9 +1371,11 @@ class SettingsDialog(QDialog):
         if self.tray_start.isChecked():
             TRAY_AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
             exec_cmd = str(launcher) if launcher.exists() else f"{sys.executable} -m rgbdeck"
-            TRAY_AUTOSTART_FILE.write_text("[Desktop Entry]\nType=Application\nName=RGB Deck\n"
-                                           f"Exec={exec_cmd} --tray\nIcon=rgbdeck\nTerminal=false\n"
-                                           "X-GNOME-Autostart-Delay=5\n")
+            TRAY_AUTOSTART_FILE.write_text(
+                "[Desktop Entry]\nType=Application\nName=RGB Deck\n"
+                f"Exec={exec_cmd} --tray\nIcon=rgbdeck\nTerminal=false\n"
+                "X-GNOME-Autostart-Delay=5\n"
+            )
         else:
             TRAY_AUTOSTART_FILE.unlink(missing_ok=True)
         return self.settings
@@ -1234,9 +1385,15 @@ class SettingsDialog(QDialog):
 # Main window
 # =============================================================================
 class MainWindow(QMainWindow):
+    scanFinished = Signal()
+
     def __init__(self, client: LocalBackend):
         super().__init__()
         self.client = client
+        self._scanning = False
+        self._scan_error = ""
+        self._scan_resume_fx = None
+        self.scanFinished.connect(self._scan_done)
         self.setWindowTitle(APP_NAME)
         self.resize(1440, 860)
         self.settings = load_json(SETTINGS_FILE, {})
@@ -1311,19 +1468,39 @@ class MainWindow(QMainWindow):
         self.dev_title = QLabel("")
         self.dev_title.setObjectName("devTitle")
         head.addWidget(self.dev_title)
+        self.exp_badge = QLabel("EXPERIMENTAL")
+        self.exp_badge.setToolTip(
+            "This driver was ported from protocol sources and has not been confirmed on real "
+            "hardware yet. If something is off, please open a device-support issue."
+        )
+        self.exp_badge.setStyleSheet(
+            "QLabel{background:#3a2f12;color:#ffc857;border:1px solid #6b5520;border-radius:8px;"
+            "padding:3px 8px;font-size:10px;font-weight:700;letter-spacing:1px;}"
+        )
+        self.exp_badge.setVisible(False)
+        head.addWidget(self.exp_badge)
         head.addStretch(1)
         self.seg_buttons: Dict[str, QToolButton] = {}
         seg = QHBoxLayout()
         seg.setSpacing(0)
-        for i, (key, text, tip) in enumerate([
+        for i, (key, text, tip) in enumerate(
+            [
                 ("device", "Whole device", "Colors apply to the entire device (and synced devices)"),
                 ("paint", "🖌 Paint keys", "Click or drag over keys to paint them with the active color"),
-                ("select", "⬚ Select keys", "Pick keys (click, Ctrl-click, drag a box); colors then apply only to them")]):
+                (
+                    "select",
+                    "⬚ Select keys",
+                    "Pick keys (click, Ctrl-click, drag a box); colors then apply only to them",
+                ),
+            ]
+        ):
             b = QToolButton()
             b.setObjectName("segL" if i == 0 else ("segR" if i == 2 else "seg"))
-            b.setStyleSheet(f"QToolButton{{border-radius:0;padding:7px 14px;background:#262a35;}}QToolButton:checked{{background:{ACCENT};font-weight:600;}}"
-                            + ("QToolButton{border-top-left-radius:9px;border-bottom-left-radius:9px;}" if i == 0 else "")
-                            + ("QToolButton{border-top-right-radius:9px;border-bottom-right-radius:9px;}" if i == 2 else ""))
+            b.setStyleSheet(
+                f"QToolButton{{border-radius:0;padding:7px 14px;background:#262a35;}}QToolButton:checked{{background:{ACCENT};font-weight:600;}}"
+                + ("QToolButton{border-top-left-radius:9px;border-bottom-left-radius:9px;}" if i == 0 else "")
+                + ("QToolButton{border-top-right-radius:9px;border-bottom-right-radius:9px;}" if i == 2 else "")
+            )
             b.setCheckable(True)
             b.setText(text)
             b.setToolTip(tip)
@@ -1367,8 +1544,10 @@ class MainWindow(QMainWindow):
         b.clicked.connect(lambda: self._rainbow("v"))
         act.addWidget(b)
         self.grad_a, self.grad_b = Swatch(QColor("#ff2d55"), 28), Swatch(QColor("#00b4ff"), 28)
-        for sw, tip in ((self.grad_a, "Gradient start (click = set to active color)"),
-                        (self.grad_b, "Gradient end (click = set to active color)")):
+        for sw, tip in (
+            (self.grad_a, "Gradient start (click = set to active color)"),
+            (self.grad_b, "Gradient end (click = set to active color)"),
+        ):
             sw.setToolTip(tip)
         self.grad_a.clicked.connect(lambda: self.grad_a.setColor(self.color_panel.color()))
         self.grad_b.clicked.connect(lambda: self.grad_b.setColor(self.color_panel.color()))
@@ -1413,7 +1592,9 @@ class MainWindow(QMainWindow):
         b.clicked.connect(self._save_preset)
         prow.addWidget(b, 0, Qt.AlignTop)
         pr_lay.addLayout(prow)
-        self.preset_hint = QLabel("A preset remembers every device's effect and colors. ★ = applied automatically when you log in.")
+        self.preset_hint = QLabel(
+            "A preset remembers every device's effect and colors. ★ = applied automatically when you log in."
+        )
         self.preset_hint.setObjectName("hint")
         pr_lay.addWidget(self.preset_hint)
         left.addWidget(pr_card, 0)
@@ -1476,6 +1657,16 @@ class MainWindow(QMainWindow):
         a = QAction("How to use", self)
         a.triggered.connect(self._show_help)
         h.addAction(a)
+        a = QAction("Troubleshooting", self)
+        a.triggered.connect(self._show_troubleshooting)
+        h.addAction(a)
+        a = QAction("Open log file", self)
+        a.triggered.connect(lambda: __import__("subprocess").Popen(["xdg-open", str(LOG_FILE)]))
+        h.addAction(a)
+        h.addSeparator()
+        a = QAction("About RGB Deck", self)
+        a.triggered.connect(self._show_about)
+        h.addAction(a)
 
     # ------------------------------------------------------------ devices
     def _populate_devices(self):
@@ -1525,9 +1716,12 @@ class MainWindow(QMainWindow):
         if info:
             if True:
                 pct, wired = info
-                title += (f"  <span style='color:#9aa0b4;font-size:13px;font-weight:normal'>🔋 {pct}%"
-                          f"{' · on cable' if wired else ''}</span>")
+                title += (
+                    f"  <span style='color:#9aa0b4;font-size:13px;font-weight:normal'>🔋 {pct}%"
+                    f"{' · on cable' if wired else ''}</span>"
+                )
         self.dev_title.setText(title)
+        self.exp_badge.setVisible(bool(getattr(d, "experimental", False)))
         geoms = build_geometry(d)
         self.canvas.set_device(geoms, d.colors, d.type_name, device_colors_preview(d))
         self._build_zone_row(d)
@@ -1538,8 +1732,10 @@ class MainWindow(QMainWindow):
             self._set_interaction("device")
         self.effects.set_device(d)
         self.effects.show_app_section(has_keys)
-        self.effects.set_app_effect(self.engine_kind if (self.engine_dev is d) else None,
-                                    self.engine.settings if (self.engine_dev is d and self.engine) else None)
+        self.effects.set_app_effect(
+            self.engine_kind if (self.engine_dev is d) else None,
+            self.engine.settings if (self.engine_dev is d and self.engine) else None,
+        )
         self.dim_slider.blockSignals(True)
         self.dim_slider.setValue(self.dim.get(d.index, 100))
         self.dim_val.setText(f"{self.dim_slider.value()}%")
@@ -1602,8 +1798,11 @@ class MainWindow(QMainWindow):
         elif mode == "paint":
             txt = "Click or drag across keys to paint them with the active color. Right-click a key to grab its color."
         else:
-            txt = (f"{n} key(s) selected — colors now apply only to them. " if n else
-                   "Click keys, Ctrl-click to toggle, or drag a box. ") + "Ctrl+A all · Esc clear · Ctrl+I invert"
+            txt = (
+                f"{n} key(s) selected — colors now apply only to them. "
+                if n
+                else "Click keys, Ctrl-click to toggle, or drag a box. "
+            ) + "Ctrl+A all · Esc clear · Ctrl+I invert"
         self.hint.setText(txt)
 
     def _sync_toggled(self, on: bool):
@@ -1661,9 +1860,11 @@ class MainWindow(QMainWindow):
                 d = self.client.devices[idx]
                 base = self.base_colors[idx]
                 f = self.dim.get(idx, 100) / 100.0
-                out = list(base) if f >= 0.999 else [rgb_to_u32(*(int(x * f + 0.5) for x in u32_to_rgb(c))) for c in base]
+                out = (
+                    list(base) if f >= 0.999 else [rgb_to_u32(*(int(x * f + 0.5) for x in u32_to_rgb(c))) for c in base]
+                )
                 if self.engine and self.engine_dev is d:
-                    self.engine.background = out       # effect renders on top of the new colors
+                    self.engine.background = out  # effect renders on top of the new colors
                     self._fx_last_frame = None
                 else:
                     self.client.update_leds(d, out)
@@ -1680,8 +1881,11 @@ class MainWindow(QMainWindow):
         """Whole device (or given LEDs) takes color c, whatever kind of device it is."""
         col = qcolor_to_u32(c)
         per_led = self._per_led_mode(d)
-        if per_led and d.led_names and (leds or d.current_mode.color_mode == MODE_COLORS_PER_LED
-                                        or not d.current_mode.has_mode_colors):
+        if (
+            per_led
+            and d.led_names
+            and (leds or d.current_mode.color_mode == MODE_COLORS_PER_LED or not d.current_mode.has_mode_colors)
+        ):
             targets = leds if leds else range(len(d.colors))
             self._set_targets({i: col for i in targets}, d)
             return
@@ -1698,9 +1902,9 @@ class MainWindow(QMainWindow):
         self.client.update_mode(d, m)
         if d is self.dev:
             if m.index != prev_mode or m.color_mode != prev_cm:
-                self.effects.refresh_active()          # effect switched: rebuild once
+                self.effects.refresh_active()  # effect switched: rebuild once
             else:
-                self.effects.sync_colors()             # same effect: just recolor swatches
+                self.effects.sync_colors()  # same effect: just recolor swatches
             self.canvas.set_fallback(device_colors_preview(d))
 
     def _active_color_changed(self, c: QColor, live: bool):
@@ -1708,7 +1912,7 @@ class MainWindow(QMainWindow):
             return
         try:
             if self.canvas.mode == "paint":
-                return                      # just sets the brush
+                return  # just sets the brush
             if self.canvas.mode == "select":
                 if self.canvas.selected:
                     self._apply_color_to_device(self.dev, c, set(self.canvas.selected))
@@ -1716,9 +1920,12 @@ class MainWindow(QMainWindow):
             # whole device (+ sync)
             targets = self.client.devices if self.sync_chk.isChecked() else [self.dev]
             for d in targets:
-                if self._per_led_mode(d) and d.led_names and (
-                        d.current_mode.color_mode == MODE_COLORS_PER_LED or not d.current_mode.has_mode_colors):
-                    self._apply_color_to_device(d, c)      # per-LED: coalesced by the frame timer
+                if (
+                    self._per_led_mode(d)
+                    and d.led_names
+                    and (d.current_mode.color_mode == MODE_COLORS_PER_LED or not d.current_mode.has_mode_colors)
+                ):
+                    self._apply_color_to_device(d, c)  # per-LED: coalesced by the frame timer
                 else:
                     # effect-colored devices (mouse): a mode write per wheel pixel floods the firmware,
                     # so send at most every 150 ms while dragging and always once on release
@@ -1750,7 +1957,7 @@ class MainWindow(QMainWindow):
         if self.canvas.mode == "select" and self.canvas.selected:
             self._apply_color_to_device(self.dev, c, set(self.canvas.selected))
         else:
-            for d in (self.client.devices if self.sync_chk.isChecked() else [self.dev]):
+            for d in self.client.devices if self.sync_chk.isChecked() else [self.dev]:
                 self._apply_color_to_device(d, c)
         self._refresh_tabs()
 
@@ -1789,9 +1996,11 @@ class MainWindow(QMainWindow):
         mp = {}
         for g, v in zip(t, vals):
             k = (v - lo) / (hi - lo)
-            mp[g.led] = rgb_to_u32(int(a.red() + (b.red() - a.red()) * k + 0.5),
-                                   int(a.green() + (b.green() - a.green()) * k + 0.5),
-                                   int(a.blue() + (b.blue() - a.blue()) * k + 0.5))
+            mp[g.led] = rgb_to_u32(
+                int(a.red() + (b.red() - a.red()) * k + 0.5),
+                int(a.green() + (b.green() - a.green()) * k + 0.5),
+                int(a.blue() + (b.blue() - a.blue()) * k + 0.5),
+            )
         self._set_targets(mp)
 
     def _dim_changed(self, v):
@@ -1856,7 +2065,10 @@ class MainWindow(QMainWindow):
                 slo, shi = sorted((src.brightness_min, src.brightness_max))
                 m.brightness = int(lo + (src.brightness - slo) / max(1, shi - slo) * (hi - lo))
             if m.has_mode_colors and src.colors:
-                m.colors = [src.colors[i % len(src.colors)] for i in range(max(m.colors_min, min(len(src.colors), m.colors_max)))]
+                m.colors = [
+                    src.colors[i % len(src.colors)]
+                    for i in range(max(m.colors_min, min(len(src.colors), m.colors_max)))
+                ]
                 m.color_mode = src.color_mode if src.color_mode != MODE_COLORS_PER_LED else m.color_mode
             self.client.update_mode(d, m)
         self._refresh_tabs()
@@ -1892,7 +2104,7 @@ class MainWindow(QMainWindow):
         self.engine = EffectEngine(pos, name_to_led, lambda: self._active_rgb())
         self.engine.settings = settings
         self.engine_dev, self.engine_kind = d, kind
-        self._queue_leds(d)                      # pushes current colors into engine.background
+        self._queue_leds(d)  # pushes current colors into engine.background
         paths = find_keyboard_events(d.name)
         self.listener = KeyListener(paths, self.engine.key_pressed)
         self.listener.start()
@@ -1906,11 +2118,16 @@ class MainWindow(QMainWindow):
         if not self.listener:
             return
         if self.listener.ok:
-            self.effects.listen_lbl.setText(f"Listening for key presses on {len(self.listener.paths)} input device(s). "
-                                            "Keep RGB Deck running (it can sit in the tray) for the effect to work.")
+            self.effects.listen_lbl.setText(
+                f"Listening for key presses on {len(self.listener.paths)} input device(s). "
+                "Keep RGB Deck running (it can sit in the tray) for the effect to work."
+            )
         else:
-            self.effects.listen_lbl.setText("Couldn't read key presses: " + (self.listener.error or "no keyboard input device found")
-                                            + ". Your user needs read access to /dev/input/event* (the 'input' group).")
+            self.effects.listen_lbl.setText(
+                "Couldn't read key presses: "
+                + (self.listener.error or "no keyboard input device found")
+                + ". Your user needs read access to /dev/input/event* (the 'input' group)."
+            )
 
     def _stop_app_effect(self, keep_mode: bool = False):
         if self.listener:
@@ -1923,7 +2140,7 @@ class MainWindow(QMainWindow):
             self.engine = None
             self.engine_dev = self.engine_kind = None
             try:
-                self.client.update_leds(d, base)      # back to the plain colors
+                self.client.update_leds(d, base)  # back to the plain colors
             except DeviceError:
                 pass
             if d is self.dev:
@@ -1965,14 +2182,38 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------- presets
     def _snapshot(self) -> dict:
-        return {"devices": [{
-            "name": d.name, "serial": d.serial, "type": d.type_name, "active_mode": d.active_mode,
-            "modes": {m.name: {"speed": m.speed, "brightness": m.brightness, "direction": m.direction,
-                               "color_mode": m.color_mode, "colors": m.colors} for m in d.modes},
-            "colors": self.base_colors.get(d.index, list(d.colors)), "dim": self.dim.get(d.index, 100),
-        } for d in self.client.devices],
-            "app_effect": ({"device": self.engine_dev.name, "active_color": qcolor_to_u32(self.color_panel.color()),
-                            **self.engine.settings.to_dict()} if self.engine and self.engine_dev else None)}
+        return {
+            "devices": [
+                {
+                    "name": d.name,
+                    "serial": d.serial,
+                    "type": d.type_name,
+                    "active_mode": d.active_mode,
+                    "modes": {
+                        m.name: {
+                            "speed": m.speed,
+                            "brightness": m.brightness,
+                            "direction": m.direction,
+                            "color_mode": m.color_mode,
+                            "colors": m.colors,
+                        }
+                        for m in d.modes
+                    },
+                    "colors": self.base_colors.get(d.index, list(d.colors)),
+                    "dim": self.dim.get(d.index, 100),
+                }
+                for d in self.client.devices
+            ],
+            "app_effect": (
+                {
+                    "device": self.engine_dev.name,
+                    "active_color": qcolor_to_u32(self.color_panel.color()),
+                    **self.engine.settings.to_dict(),
+                }
+                if self.engine and self.engine_dev
+                else None
+            ),
+        }
 
     def _refresh_presets(self):
         while self.presets_lay.count():
@@ -2057,9 +2298,11 @@ class MainWindow(QMainWindow):
             AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
             launcher = Path.home() / ".local/bin/rgbdeck"
             exec_cmd = str(launcher) if launcher.exists() else f"{sys.executable} -m rgbdeck"
-            AUTOSTART_FILE.write_text("[Desktop Entry]\nType=Application\nName=RGB Deck (apply preset)\n"
-                                      f"Exec={exec_cmd} --apply \"{name}\"\nX-GNOME-Autostart-Delay=5\n"
-                                      "Icon=rgbdeck\nTerminal=false\nNoDisplay=true\n")
+            AUTOSTART_FILE.write_text(
+                "[Desktop Entry]\nType=Application\nName=RGB Deck (apply preset)\n"
+                f'Exec={exec_cmd} --apply "{name}"\nX-GNOME-Autostart-Delay=5\n'
+                "Icon=rgbdeck\nTerminal=false\nNoDisplay=true\n"
+            )
         else:
             self.settings.pop("autostart_preset", None)
             AUTOSTART_FILE.unlink(missing_ok=True)
@@ -2068,26 +2311,55 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ connection
     def _rescan(self):
-        fx = None
+        self.start_scan()
+
+    def start_scan(self):
+        """Probe devices on a background thread so the window stays responsive (some probes take seconds)."""
+        if self._scanning:
+            return
+        self._scanning = True
+        self._scan_error = ""
         if self.engine and self.engine_dev:
-            fx = (self.engine_dev.name, self.engine_kind, self.engine.settings)
+            self._scan_resume_fx = (self.engine_dev.name, self.engine_kind, self.engine.settings)
             self._stop_app_effect()
+        self.statusBar().showMessage("Scanning for devices…")
+        threading.Thread(target=self._scan_worker, name="rgbdeck-scan", daemon=True).start()
+
+    def _scan_worker(self):
         try:
             self.client.refresh()
-            self.base_colors = {d.index: list(d.colors) for d in self.client.devices}
-            self.dim = {d.index: self.dim.get(d.index, 100) for d in self.client.devices}
-            self._populate_devices()
-        except DeviceError as e:
-            self.statusBar().showMessage(f"Device error: {e}")
-            return
+        except Exception as e:  # noqa: BLE001 - report, never crash the UI
+            log.exception("device scan failed")
+            self._scan_error = str(e)
+        self.scanFinished.emit()
+
+    def _scan_done(self):
+        self._scanning = False
+        self.base_colors = {d.index: list(d.colors) for d in self.client.devices}
+        self.dim = {d.index: self.dim.get(d.index, 100) for d in self.client.devices}
+        self._populate_devices()
+        fx, self._scan_resume_fx = self._scan_resume_fx, None
         if fx:
             d = next((x for x in self.client.devices if x.name == fx[0]), None)
             if d:
                 self._start_app_effect(d, fx[1], fx[2])
+        err = self._scan_error or self.client.last_error
         if not self.client.devices:
-            self.statusBar().showMessage("No supported devices connected — plug one in, it will be picked up automatically.")
+            if "can't open" in err or "Permission" in err:
+                self.statusBar().showMessage(
+                    "Found devices but can't access them — install the udev rule (see Help → Troubleshooting)."
+                )
+                self.hint.setText("Permission problem: " + err)
+            else:
+                self.statusBar().showMessage(
+                    "No supported devices connected — plug one in, it will be picked up automatically."
+                )
+        elif err:
+            self.statusBar().showMessage(f"{len(self.client.devices)} device(s) · some failed: {err}", 8000)
 
     def _poll_server(self):
+        if self._scanning:
+            return
         err = self.client.take_error()
         if err:
             self.statusBar().showMessage(f"Device error: {err}")
@@ -2102,12 +2374,8 @@ class MainWindow(QMainWindow):
 
     def _try_reconnect(self):
         self.statusBar().showMessage("A device stopped answering — looking again…")
-        try:
-            self.client.refresh()
-            self.dev = None
-            self._populate_devices()
-        except (DeviceError, OSError) as e:
-            self.statusBar().showMessage(f"Device error: {e}")
+        self.dev = None
+        self.start_scan()
 
     def _open_settings(self):
         dlg = SettingsDialog(dict(self.settings), self)
@@ -2120,8 +2388,37 @@ class MainWindow(QMainWindow):
             self.engine.settings.fps = int(self.settings.get("fx_fps", 24))
             self._fx_timer.setInterval(int(1000 / max(10, self.engine.settings.fps)))
 
+    def _show_troubleshooting(self):
+        QMessageBox.information(
+            self,
+            "Troubleshooting",
+            "<b>Device found but can't be accessed</b><br>Install the udev rule once, then unplug/replug:<br>"
+            "<code>sudo cp rgbdeck/data/70-rgbdeck.rules /etc/udev/rules.d/ &amp;&amp; sudo udevadm control --reload "
+            "&amp;&amp; sudo udevadm trigger</code><br><br>"
+            "<b>Device not listed</b><br>Only families with a driver are detected (see the README table). "
+            "Another program talking to the device (vendor software, OpenRGB…) must be closed first.<br><br>"
+            "<b>Colors don't change on a Glorious mouse</b><br>Its lighting is stored per onboard profile; "
+            "RGB Deck writes all three, so this should not happen — if it does, press the profile button once.<br><br>"
+            "<b>Typing effects don't react</b><br>They read /dev/input; your user needs access (logind grants it to "
+            "the active session). Check the hint under the effect chips.<br><br>"
+            f"<b>Logs</b><br>{LOG_FILE} (run <code>rgbdeck --verbose</code> for more detail).",
+        )
+
+    def _show_about(self):
+        QMessageBox.about(
+            self,
+            "About RGB Deck",
+            f"<h3>RGB Deck {__version__}</h3>"
+            "<p>Standalone RGB lighting control — talks to your devices directly, no vendor software.</p>"
+            "<p><a href='https://github.com/dancingduck425/rgbdeck'>github.com/dancingduck425/rgbdeck</a></p>"
+            "<p style='color:#9aa0b4'>GPL-2.0. Protocols learned from GPL-2.0 driver sources; RGB Deck does not use "
+            "or depend on them at runtime.</p>",
+        )
+
     def _show_help(self):
-        QMessageBox.information(self, "How to use RGB Deck",
+        QMessageBox.information(
+            self,
+            "How to use RGB Deck",
             "<b>Quick color</b> — with <i>Whole device</i> selected (the default), click any palette swatch or "
             "drag the wheel and the device changes instantly. Turn on <i>Sync all devices</i> to recolor the "
             "keyboard and mouse together.<br><br>"
@@ -2131,7 +2428,8 @@ class MainWindow(QMainWindow):
             "<b>Effects</b> — chips on the right; speed, brightness, direction and the effect's colors appear when "
             "available. <i>Keep on device</i> writes it into the hardware's own memory.<br><br>"
             "<b>Presets</b> — save the whole look; right-click a preset for ★ Apply at login.<br><br>"
-            "Keys: 1/2/3 switch modes · F fill · Ctrl+A select all · Esc clear · Ctrl+I invert")
+            "Keys: 1/2/3 switch modes · F fill · Ctrl+A select all · Esc clear · Ctrl+I invert",
+        )
 
     def _start_control_socket(self):
         self._ctl = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -2183,8 +2481,14 @@ class MainWindow(QMainWindow):
         a.triggered.connect(self._quit)
         self.tray.setContextMenu(menu)
         self.tray.setToolTip(APP_NAME)
-        self.tray.activated.connect(lambda r: self._show_from_tray() if r == QSystemTrayIcon.Trigger else None)
+        self.tray.activated.connect(lambda r: self._toggle_from_tray() if r == QSystemTrayIcon.Trigger else None)
         self.tray.show()
+
+    def _toggle_from_tray(self):
+        if self.isVisible() and not self.isMinimized() and self.isActiveWindow():
+            self.hide()
+        else:
+            self._show_from_tray()
 
     def _show_from_tray(self):
         self.showNormal()
@@ -2207,8 +2511,12 @@ class MainWindow(QMainWindow):
             e.ignore()
             self.hide()
             if not self.settings.get("tray_hint_shown"):
-                self.tray.showMessage(APP_NAME, "Still running in the tray so your typing effect keeps working. "
-                                      "Right-click the tray icon to quit.", QSystemTrayIcon.Information, 6000)
+                self.tray.showMessage(
+                    APP_NAME,
+                    "Still running in the tray so your typing effect keeps working. Right-click the tray icon to quit.",
+                    QSystemTrayIcon.Information,
+                    6000,
+                )
                 self.settings["tray_hint_shown"] = True
                 save_json(SETTINGS_FILE, self.settings)
             return
@@ -2223,9 +2531,14 @@ class MainWindow(QMainWindow):
 # =============================================================================
 def apply_snapshot(client: LocalBackend, snap: dict, base_colors: Optional[dict] = None, dim: Optional[dict] = None):
     for entry in snap.get("devices", []):
-        dev = next((d for d in client.devices if d.name == entry["name"] and
-                    (not entry.get("serial") or d.serial == entry["serial"])), None) or \
-              next((d for d in client.devices if d.name == entry["name"]), None)
+        dev = next(
+            (
+                d
+                for d in client.devices
+                if d.name == entry["name"] and (not entry.get("serial") or d.serial == entry["serial"])
+            ),
+            None,
+        ) or next((d for d in client.devices if d.name == entry["name"]), None)
         if not dev:
             continue
         for m in dev.modes:
@@ -2239,7 +2552,7 @@ def apply_snapshot(client: LocalBackend, snap: dict, base_colors: Optional[dict]
         if 0 <= am < len(dev.modes):
             client.update_mode(dev, dev.modes[am])
             if dev.modes[am].color_mode == MODE_COLORS_PER_LED and entry.get("colors"):
-                cols = list(entry["colors"])[:len(dev.colors)]
+                cols = list(entry["colors"])[: len(dev.colors)]
                 cols += [0] * (len(dev.colors) - len(cols))
                 f = entry.get("dim", 100) / 100.0
                 if base_colors is not None:
@@ -2253,6 +2566,7 @@ def apply_snapshot(client: LocalBackend, snap: dict, base_colors: Optional[dict]
 def run_headless_effect(client: LocalBackend, snap: dict) -> int:
     """Keep a typing effect running without a window (used by 'apply at login')."""
     import time as _time
+
     fx = snap["app_effect"]
     dev = next((d for d in client.devices if d.name == fx.get("device")), None)
     if not dev:
@@ -2292,7 +2606,7 @@ def main(argv: List[str]) -> int:
             print(f"no preset named {name!r}", file=sys.stderr)
             return 1
         handed = send_control(f"apply {name}")
-        if handed is not None:                       # the GUI is running: let it do it (one controller per device)
+        if handed is not None:  # the GUI is running: let it do it (one controller per device)
             print(handed)
             return 0 if handed.startswith("applied") else 1
         c = LocalBackend()
@@ -2309,7 +2623,7 @@ def main(argv: List[str]) -> int:
             print(n)
         return 0
 
-    if send_control("show") is not None:             # already running: just raise that window
+    if send_control("show") is not None:  # already running: just raise that window
         return 0
     setup_logging("--verbose" in argv or "-v" in argv)
     log.info("RGB Deck starting")
@@ -2322,22 +2636,12 @@ def main(argv: List[str]) -> int:
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
     client = LocalBackend()
-    client.connect()
-    if not client.devices:
-        msg = client.last_error or ""
-        if "can't open" in msg or "Permission" in msg:
-            QMessageBox.warning(None, APP_NAME, "Found RGB devices but can't access them.\n\n" + msg +
-                                "\n\nInstall the udev rule once (see README / install.sh), then replug the device.")
-        else:
-            QMessageBox.information(None, APP_NAME, "No supported RGB devices found right now.\n\n"
-                                    "RGB Deck keeps watching — plug a device in and it appears automatically. "
-                                    "If another program is using the device, close it first."
-                                    + (f"\n\nDetails: {msg}" if msg else ""))
     w = MainWindow(client)
     if "--tray" in argv and w.tray.isVisible():
         w.hide()
     else:
         w.show()
+    w.start_scan()
     rc = app.exec()
     client.shutdown()
     return rc

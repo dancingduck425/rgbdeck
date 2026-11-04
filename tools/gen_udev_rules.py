@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Regenerate rgbdeck/data/70-rgbdeck.rules from every driver's USB_IDS. Run after adding a driver."""
+
 import os
 import sys
 
@@ -20,8 +21,12 @@ for mod in discover_drivers():
         if (vid, pid) in seen:
             continue
         seen.add((vid, pid))
-        lines.append(f'SUBSYSTEMS=="usb|hidraw", ATTRS{{idVendor}}=="{vid:04x}", ATTRS{{idProduct}}=="{pid:04x}", TAG+="uaccess"')
-lines.append("# keyboard key presses for the typing effects (logind already grants seat devices; kept for completeness)")
+        lines.append(
+            f'SUBSYSTEMS=="usb|hidraw", ATTRS{{idVendor}}=="{vid:04x}", ATTRS{{idProduct}}=="{pid:04x}", TAG+="uaccess"'
+        )
+lines.append(
+    "# keyboard key presses for the typing effects (logind already grants seat devices; kept for completeness)"
+)
 lines.append('SUBSYSTEM=="input", ATTRS{idVendor}=="046d", TAG+="uaccess"')
 out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rgbdeck", "data", "70-rgbdeck.rules")
 with open(out, "w") as f:

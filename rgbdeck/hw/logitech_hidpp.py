@@ -6,27 +6,53 @@ Works with any Logitech keyboard exposing feature 0x8080 (per-key lighting) and 
 from the device itself (0x8080 GetKeyColors paging), named from the USB HID usage table and the
 keyboard's layout code (feature 0x4540), so no per-model tables are needed. Talks to /dev/hidraw.
 """
+
 from __future__ import annotations
 
 import logging
 import time
 from typing import Dict, List, Tuple
 
-from rgbdeck.models import (Device, DeviceError, Mode, Zone, MODE_COLORS_MODE_SPECIFIC, MODE_COLORS_PER_LED,
-                            MODE_FLAG_HAS_BRIGHTNESS, MODE_FLAG_HAS_DIRECTION_HV, MODE_FLAG_HAS_DIRECTION_LR,
-                            MODE_FLAG_HAS_DIRECTION_UD, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
-                            MODE_FLAG_HAS_PER_LED_COLOR, MODE_FLAG_HAS_SPEED, MODE_FLAG_MANUAL_SAVE,
-                            rgb_to_u32, u32_to_rgb)
+from rgbdeck.models import (
+    Device,
+    DeviceError,
+    Mode,
+    Zone,
+    MODE_COLORS_MODE_SPECIFIC,
+    MODE_COLORS_PER_LED,
+    MODE_FLAG_HAS_BRIGHTNESS,
+    MODE_FLAG_HAS_DIRECTION_HV,
+    MODE_FLAG_HAS_DIRECTION_LR,
+    MODE_FLAG_HAS_DIRECTION_UD,
+    MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
+    MODE_FLAG_HAS_PER_LED_COLOR,
+    MODE_FLAG_HAS_SPEED,
+    MODE_FLAG_MANUAL_SAVE,
+    rgb_to_u32,
+    u32_to_rgb,
+)
 from rgbdeck.hw.hidraw import HidDevice, enumerate_hid
 
 log = logging.getLogger("rgbdeck.logitech")
 
 VID_LOGITECH = 0x046D
 # Known RGB keyboards (name only; anything else from Logitech with 0x8080 is probed too)
-KNOWN = {0xC33C: "Logitech G513", 0xC33E: "Logitech G512", 0xC339: "Logitech G810", 0xC337: "Logitech G810",
-         0xC32B: "Logitech G910", 0xC335: "Logitech G910", 0xC33F: "Logitech G815", 0xC541: "Logitech G915",
-         0xC343: "Logitech G915 TKL", 0xC545: "Logitech G915 TKL", 0xC336: "Logitech G213",
-         0xC342: "Logitech G512 Carbon", 0xC33A: "Logitech G413", 0xC54D: "Logitech PRO X 60"}
+KNOWN = {
+    0xC33C: "Logitech G513",
+    0xC33E: "Logitech G512",
+    0xC339: "Logitech G810",
+    0xC337: "Logitech G810",
+    0xC32B: "Logitech G910",
+    0xC335: "Logitech G910",
+    0xC33F: "Logitech G815",
+    0xC541: "Logitech G915",
+    0xC343: "Logitech G915 TKL",
+    0xC545: "Logitech G915 TKL",
+    0xC336: "Logitech G213",
+    0xC342: "Logitech G512 Carbon",
+    0xC33A: "Logitech G413",
+    0xC54D: "Logitech PRO X 60",
+}
 
 SWID = 0x07
 DEV_IDX = 0xFF
@@ -38,22 +64,67 @@ FEAT_DEVICE_NAME = 0x0005
 ERR_BUSY = 0x08
 KEYS_PER_FRAME = 14
 
-KT_KEYBOARD = 0x0001      # keyIds are USB HID keyboard usages
-KT_INDICATOR = 0x0040     # logos / lock indicators / G-key clusters (device specific)
+KT_KEYBOARD = 0x0001  # keyIds are USB HID keyboard usages
+KT_INDICATOR = 0x0040  # logos / lock indicators / G-key clusters (device specific)
 
 # USB HID keyboard usage -> key name (which keyboard_layout.py and effects.py understand)
 USAGE_NAMES: Dict[int, str] = {
-    0x28: "Enter", 0x29: "Escape", 0x2A: "Backspace", 0x2B: "Tab", 0x2C: "Space", 0x2D: "-", 0x2E: "=",
-    0x2F: "[", 0x30: "]", 0x31: "\\ (ANSI)", 0x32: "# (ISO)", 0x33: ";", 0x34: "'", 0x35: "`", 0x36: ",",
-    0x37: ".", 0x38: "/", 0x39: "Caps Lock", 0x46: "Print Screen", 0x47: "Scroll Lock", 0x48: "Pause/Break",
-    0x49: "Insert", 0x4A: "Home", 0x4B: "Page Up", 0x4C: "Delete", 0x4D: "End", 0x4E: "Page Down",
-    0x4F: "Right Arrow", 0x50: "Left Arrow", 0x51: "Down Arrow", 0x52: "Up Arrow", 0x53: "Num Lock",
-    0x54: "Number Pad /", 0x55: "Number Pad *", 0x56: "Number Pad -", 0x57: "Number Pad +",
-    0x58: "Number Pad Enter", 0x62: "Number Pad 0", 0x63: "Number Pad .", 0x64: "\\ (ISO)", 0x65: "Menu",
-    0x67: "Number Pad =", 0x85: "Number Pad ,", 0x87: "Ro (JIS)", 0x88: "Katakana/Hiragana (JIS)",
-    0x89: "Yen (JIS)", 0x8A: "Henkan (JIS)", 0x8B: "Muhenkan (JIS)",
-    0xE0: "Left Control", 0xE1: "Left Shift", 0xE2: "Left Alt", 0xE3: "Left Windows",
-    0xE4: "Right Control", 0xE5: "Right Shift", 0xE6: "Right Alt", 0xE7: "Right Windows",
+    0x28: "Enter",
+    0x29: "Escape",
+    0x2A: "Backspace",
+    0x2B: "Tab",
+    0x2C: "Space",
+    0x2D: "-",
+    0x2E: "=",
+    0x2F: "[",
+    0x30: "]",
+    0x31: "\\ (ANSI)",
+    0x32: "# (ISO)",
+    0x33: ";",
+    0x34: "'",
+    0x35: "`",
+    0x36: ",",
+    0x37: ".",
+    0x38: "/",
+    0x39: "Caps Lock",
+    0x46: "Print Screen",
+    0x47: "Scroll Lock",
+    0x48: "Pause/Break",
+    0x49: "Insert",
+    0x4A: "Home",
+    0x4B: "Page Up",
+    0x4C: "Delete",
+    0x4D: "End",
+    0x4E: "Page Down",
+    0x4F: "Right Arrow",
+    0x50: "Left Arrow",
+    0x51: "Down Arrow",
+    0x52: "Up Arrow",
+    0x53: "Num Lock",
+    0x54: "Number Pad /",
+    0x55: "Number Pad *",
+    0x56: "Number Pad -",
+    0x57: "Number Pad +",
+    0x58: "Number Pad Enter",
+    0x62: "Number Pad 0",
+    0x63: "Number Pad .",
+    0x64: "\\ (ISO)",
+    0x65: "Menu",
+    0x67: "Number Pad =",
+    0x85: "Number Pad ,",
+    0x87: "Ro (JIS)",
+    0x88: "Katakana/Hiragana (JIS)",
+    0x89: "Yen (JIS)",
+    0x8A: "Henkan (JIS)",
+    0x8B: "Muhenkan (JIS)",
+    0xE0: "Left Control",
+    0xE1: "Left Shift",
+    0xE2: "Left Alt",
+    0xE3: "Left Windows",
+    0xE4: "Right Control",
+    0xE5: "Right Shift",
+    0xE6: "Right Alt",
+    0xE7: "Right Windows",
 }
 for _i, _c in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
     USAGE_NAMES[0x04 + _i] = _c
@@ -74,10 +145,10 @@ ANSI_LAYOUTS = {1, 0}
 
 # keyType 0x40 ids known per model (anything unknown is still exposed as "Extra LED n")
 INDICATOR_NAMES: Dict[int, Dict[int, str]] = {
-    0xC33C: {0x02: "Game Mode Indicator", 0x03: "Caps Lock Indicator"},                    # G513
-    0xC33E: {0x02: "Game Mode Indicator", 0x03: "Caps Lock Indicator"},                    # G512
+    0xC33C: {0x02: "Game Mode Indicator", 0x03: "Caps Lock Indicator"},  # G513
+    0xC33E: {0x02: "Game Mode Indicator", 0x03: "Caps Lock Indicator"},  # G512
     0xC342: {0x02: "Game Mode Indicator", 0x03: "Caps Lock Indicator"},
-    0xC339: {0x01: "Logo", 0x02: "Game Mode Indicator", 0x03: "Caps Lock Indicator"},      # G810
+    0xC339: {0x01: "Logo", 0x02: "Game Mode Indicator", 0x03: "Caps Lock Indicator"},  # G810
     0xC337: {0x01: "Logo", 0x02: "Game Mode Indicator", 0x03: "Caps Lock Indicator"},
 }
 # ids the firmware lists for keyType 0x40 but that have no LED on that model
@@ -102,7 +173,7 @@ class LogitechKeyboard:
         self.feat: Dict[int, int] = {}
         self.effects: Dict[int, int] = {}
         self.mode_effect: Dict[int, int] = {}
-        self.keys: List[Tuple[str, int, int]] = []      # (name, keyType, keyId) in display order
+        self.keys: List[Tuple[str, int, int]] = []  # (name, keyType, keyId) in display order
         self.hid.drain()
         try:
             self.feat[FEAT_PER_KEY] = self._get_feature_index(FEAT_PER_KEY)
@@ -203,9 +274,9 @@ class LogitechKeyboard:
             n = 0
             for e in range(0, len(entries) - 3, 4):
                 kid = entries[e]
-                if kid == 0 and not any(entries[e + 1:e + 4]) and (n or ids):
+                if kid == 0 and not any(entries[e + 1 : e + 4]) and (n or ids):
                     continue
-                if kid == 0 and not any(entries[e + 1:e + 4]):
+                if kid == 0 and not any(entries[e + 1 : e + 4]):
                     continue
                 if kid not in ids:
                     ids.append(kid)
@@ -222,7 +293,7 @@ class LogitechKeyboard:
         drop = set()
         if self.layout in ANSI_LAYOUTS:
             drop |= ISO_ONLY | JIS_ONLY
-        elif self.layout not in (0x0B, 0x12):      # non-JIS layouts: keep ISO keys, drop JIS
+        elif self.layout not in (0x0B, 0x12):  # non-JIS layouts: keep ISO keys, drop JIS
             drop |= JIS_ONLY
         keys = [(USAGE_NAMES.get(k, f"Key 0x{k:02X}"), KT_KEYBOARD, k) for k in kb_ids if k not in drop]
         try:
@@ -253,27 +324,91 @@ class LogitechKeyboard:
         if EFF_OFF in self.effects:
             add("Off", EFF_OFF, save)
         if EFF_STATIC in self.effects:
-            add("Static", EFF_STATIC, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | save, colors_min=1, colors_max=1,
-                color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[0x00B4FF])
+            add(
+                "Static",
+                EFF_STATIC,
+                MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | save,
+                colors_min=1,
+                colors_max=1,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors=[0x00B4FF],
+            )
         if EFF_BREATHING in self.effects:
-            add("Breathing", EFF_BREATHING, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save,
-                speed_min=1, speed_max=100, speed=70, brightness_min=1, brightness_max=100, brightness=100,
-                colors_min=1, colors_max=1, color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[0x00B4FF])
+            add(
+                "Breathing",
+                EFF_BREATHING,
+                MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save,
+                speed_min=1,
+                speed_max=100,
+                speed=70,
+                brightness_min=1,
+                brightness_max=100,
+                brightness=100,
+                colors_min=1,
+                colors_max=1,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors=[0x00B4FF],
+            )
         if EFF_CYCLE in self.effects:
-            add("Spectrum Cycle", EFF_CYCLE, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save,
-                speed_min=1, speed_max=100, speed=80, brightness_min=1, brightness_max=100, brightness=100)
+            add(
+                "Spectrum Cycle",
+                EFF_CYCLE,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save,
+                speed_min=1,
+                speed_max=100,
+                speed=80,
+                brightness_min=1,
+                brightness_max=100,
+                brightness=100,
+            )
         if EFF_WAVE in self.effects:
-            add("Color Wave", EFF_WAVE, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | MODE_FLAG_HAS_DIRECTION_LR
-                | MODE_FLAG_HAS_DIRECTION_UD | MODE_FLAG_HAS_DIRECTION_HV | save,
-                speed_min=1, speed_max=100, speed=80, brightness_min=1, brightness_max=100, brightness=100, direction=1)
+            add(
+                "Color Wave",
+                EFF_WAVE,
+                MODE_FLAG_HAS_SPEED
+                | MODE_FLAG_HAS_BRIGHTNESS
+                | MODE_FLAG_HAS_DIRECTION_LR
+                | MODE_FLAG_HAS_DIRECTION_UD
+                | MODE_FLAG_HAS_DIRECTION_HV
+                | save,
+                speed_min=1,
+                speed_max=100,
+                speed=80,
+                brightness_min=1,
+                brightness_max=100,
+                brightness=100,
+                direction=1,
+            )
         if EFF_RIPPLE in self.effects:
-            add("Ripple", EFF_RIPPLE, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | save,
-                speed_min=1, speed_max=100, speed=70, colors_min=1, colors_max=1,
-                color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[0x00B4FF])
+            add(
+                "Ripple",
+                EFF_RIPPLE,
+                MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | save,
+                speed_min=1,
+                speed_max=100,
+                speed=70,
+                colors_min=1,
+                colors_max=1,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors=[0x00B4FF],
+            )
         led_names = [("Key: " + n) if t == KT_KEYBOARD else n for n, t, _i in self.keys]
         zone = Zone(0, "Keyboard", 2, len(led_names), len(led_names), len(led_names), None, 0)
-        return Device(0, "Keyboard", name, "Logitech", "Logitech HID++ 2.0 keyboard (direct hidraw)", "",
-                      "", "HID: " + path, 0, modes, [zone], led_names, [0] * len(led_names))
+        return Device(
+            0,
+            "Keyboard",
+            name,
+            "Logitech",
+            "Logitech HID++ 2.0 keyboard (direct hidraw)",
+            "",
+            "",
+            "HID: " + path,
+            0,
+            modes,
+            [zone],
+            led_names,
+            [0] * len(led_names),
+        )
 
     # ---- per-key ------------------------------------------------------------------------
     def set_colors(self, colors: List[int]):
@@ -284,13 +419,13 @@ class LogitechKeyboard:
         self.hid.drain()
         for ktype, keys in by_type.items():
             for off in range(0, len(keys), KEYS_PER_FRAME):
-                chunk = keys[off:off + KEYS_PER_FRAME]
+                chunk = keys[off : off + KEYS_PER_FRAME]
                 payload = bytes([ktype >> 8, ktype & 0xFF, 0, len(chunk)])
                 for kid, col in chunk:
                     r, g, b = u32_to_rgb(col)
                     payload += bytes([kid, r, g, b])
-                self._send(idx, 0x30, payload)      # one write in flight at a time (firmware drops pipelined ones)
-        self._send(idx, 0x50)                        # flush
+                self._send(idx, 0x30, payload)  # one write in flight at a time (firmware drops pipelined ones)
+        self._send(idx, 0x50)  # flush
         self.device.colors = list(colors)
 
     def read_colors(self) -> List[int]:
@@ -303,7 +438,7 @@ class LogitechKeyboard:
                 entries = resp[4:]
                 n = 0
                 for e in range(0, len(entries) - 3, 4):
-                    kid, r, g, b = entries[e:e + 4]
+                    kid, r, g, b = entries[e : e + 4]
                     if kid == 0 and not (r or g or b):
                         continue
                     got[(ktype, kid)] = rgb_to_u32(r, g, b)
@@ -326,8 +461,11 @@ class LogitechKeyboard:
         r, g, b = u32_to_rgb(mode.colors[0]) if mode.colors else (0, 0, 0)
         d = bytearray(16)
         d[1] = self.effects[eff_id]
-        period = _slider_to_period(mode.speed, RIPPLE_MIN, RIPPLE_MAX) if eff_id == EFF_RIPPLE else \
-            _slider_to_period(mode.speed, PERIOD_MIN, PERIOD_MAX)
+        period = (
+            _slider_to_period(mode.speed, RIPPLE_MIN, RIPPLE_MAX)
+            if eff_id == EFF_RIPPLE
+            else _slider_to_period(mode.speed, PERIOD_MIN, PERIOD_MAX)
+        )
         bright = max(1, min(100, mode.brightness or 100))
         if eff_id == EFF_STATIC:
             d[2:5] = (r, g, b)
@@ -352,17 +490,103 @@ class LogitechKeyboard:
 def _display_order() -> List[str]:
     rows = [
         ["Escape"] + [f"F{i}" for i in range(1, 13)] + ["Print Screen", "Scroll Lock", "Pause/Break"],
-        ["`"] + [str(i) for i in range(1, 10)] + ["0", "-", "=", "Yen (JIS)", "Backspace", "Insert", "Home", "Page Up",
-                                                  "Num Lock", "Number Pad /", "Number Pad *", "Number Pad -"],
-        ["Tab", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", "\\ (ANSI)", "Delete", "End", "Page Down",
-         "Number Pad 7", "Number Pad 8", "Number Pad 9", "Number Pad +"],
-        ["Caps Lock", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'", "# (ISO)", "Enter",
-         "Number Pad 4", "Number Pad 5", "Number Pad 6"],
-        ["Left Shift", "\\ (ISO)", "Z", "X", "C", "V", "B", "N", "M", ",", ".", "/", "Ro (JIS)", "Right Shift",
-         "Up Arrow", "Number Pad 1", "Number Pad 2", "Number Pad 3", "Number Pad Enter"],
-        ["Left Control", "Left Windows", "Left Alt", "Muhenkan (JIS)", "Space", "Henkan (JIS)",
-         "Katakana/Hiragana (JIS)", "Right Alt", "Right Windows", "Menu", "Right Control",
-         "Left Arrow", "Down Arrow", "Right Arrow", "Number Pad 0", "Number Pad ."],
+        ["`"]
+        + [str(i) for i in range(1, 10)]
+        + [
+            "0",
+            "-",
+            "=",
+            "Yen (JIS)",
+            "Backspace",
+            "Insert",
+            "Home",
+            "Page Up",
+            "Num Lock",
+            "Number Pad /",
+            "Number Pad *",
+            "Number Pad -",
+        ],
+        [
+            "Tab",
+            "Q",
+            "W",
+            "E",
+            "R",
+            "T",
+            "Y",
+            "U",
+            "I",
+            "O",
+            "P",
+            "[",
+            "]",
+            "\\ (ANSI)",
+            "Delete",
+            "End",
+            "Page Down",
+            "Number Pad 7",
+            "Number Pad 8",
+            "Number Pad 9",
+            "Number Pad +",
+        ],
+        [
+            "Caps Lock",
+            "A",
+            "S",
+            "D",
+            "F",
+            "G",
+            "H",
+            "J",
+            "K",
+            "L",
+            ";",
+            "'",
+            "# (ISO)",
+            "Enter",
+            "Number Pad 4",
+            "Number Pad 5",
+            "Number Pad 6",
+        ],
+        [
+            "Left Shift",
+            "\\ (ISO)",
+            "Z",
+            "X",
+            "C",
+            "V",
+            "B",
+            "N",
+            "M",
+            ",",
+            ".",
+            "/",
+            "Ro (JIS)",
+            "Right Shift",
+            "Up Arrow",
+            "Number Pad 1",
+            "Number Pad 2",
+            "Number Pad 3",
+            "Number Pad Enter",
+        ],
+        [
+            "Left Control",
+            "Left Windows",
+            "Left Alt",
+            "Muhenkan (JIS)",
+            "Space",
+            "Henkan (JIS)",
+            "Katakana/Hiragana (JIS)",
+            "Right Alt",
+            "Right Windows",
+            "Menu",
+            "Right Control",
+            "Left Arrow",
+            "Down Arrow",
+            "Right Arrow",
+            "Number Pad 0",
+            "Number Pad .",
+        ],
     ]
     return [k for row in rows for k in row]
 
@@ -373,7 +597,7 @@ def probe() -> List[LogitechKeyboard]:
         # HID++ long reports live on the second interface of Logitech keyboards
         if info.interface != 1:
             continue
-        if info.pid not in KNOWN and b"\x06\x43\xff" not in info.descriptor:   # vendor page FF43 = HID++
+        if info.pid not in KNOWN and b"\x06\x43\xff" not in info.descriptor:  # vendor page FF43 = HID++
             continue
         try:
             found.append(LogitechKeyboard(info.path, info.pid, info.name or KNOWN.get(info.pid, "Logitech keyboard")))

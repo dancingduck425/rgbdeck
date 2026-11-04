@@ -1,4 +1,5 @@
 """Hardware-free checks for the backend worker: coalescing, ordering, errors, keepalive, hotplug state carry-over."""
+
 import os
 import sys
 import time
@@ -20,9 +21,25 @@ def check(cond, msg):
 
 class FakeDriver:
     def __init__(self, name, leds=4, slow=0.0, fail=False, keepalive=False):
-        modes = [Mode(0, "Direct", -1, MODE_FLAG_HAS_PER_LED_COLOR, color_mode=MODE_COLORS_PER_LED), Mode(1, "Static", 1, 0)]
-        self.device = Device(0, "Keyboard", name, "Fake", "", "", "", f"fake:{name}", 0, modes,
-                             [Zone(0, "Z", 2, leds, leds, leds)], [f"LED {i}" for i in range(leds)], [0] * leds)
+        modes = [
+            Mode(0, "Direct", -1, MODE_FLAG_HAS_PER_LED_COLOR, color_mode=MODE_COLORS_PER_LED),
+            Mode(1, "Static", 1, 0),
+        ]
+        self.device = Device(
+            0,
+            "Keyboard",
+            name,
+            "Fake",
+            "",
+            "",
+            "",
+            f"fake:{name}",
+            0,
+            modes,
+            [Zone(0, "Z", 2, leds, leds, leds)],
+            [f"LED {i}" for i in range(leds)],
+            [0] * leds,
+        )
         self.writes, self.modes, self.pings = [], [], 0
         self.slow, self.fail = slow, fail
         if keepalive:
@@ -89,7 +106,10 @@ check(drivers[0].writes[-1] == [5] * 4, "worker alive after a driver error")
 
 # keepalive fires while idle for drivers that offer it
 time.sleep(0.3)
-check(drivers[1].pings >= 2 and not hasattr(drivers[0], "pings") or drivers[0].pings == 0, f"keepalive called {drivers[1].pings}x on the driver that has it")
+check(
+    drivers[1].pings >= 2 and not hasattr(drivers[0], "pings") or drivers[0].pings == 0,
+    f"keepalive called {drivers[1].pings}x on the driver that has it",
+)
 
 # hotplug refresh keeps per-device state for devices still present
 A.active_mode = 1

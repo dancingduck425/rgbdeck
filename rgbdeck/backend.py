@@ -5,6 +5,7 @@ Local hardware backend.
   where a driver has .device, set_colors(), set_mode(), optional read_colors()/battery(), close().
 - All writes go through one worker thread, coalesced per (device, kind), so the UI never blocks.
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,7 +25,7 @@ log = logging.getLogger("rgbdeck.backend")
 
 # Drivers probed first, in this order (the owner-tested ones); every other module under rgbdeck.hw
 # that exposes probe() is discovered automatically and probed afterwards.
-PREFERRED_DRIVERS = ("logitech_hidpp", "glorious_gmow", "asus_aura_usb")
+PREFERRED_DRIVERS = ("logitech_hidpp", "glorious_gmow", "asus_aura_usb")  # verified on real hardware
 KEEPALIVE_INTERVAL = 5.0
 
 
@@ -46,7 +47,7 @@ def discover_drivers():
     return ordered
 
 
-NATIVE_DRIVERS = ()   # filled lazily by discover_drivers()
+NATIVE_DRIVERS = ()  # filled lazily by discover_drivers()
 
 
 class LocalBackend:
@@ -60,7 +61,7 @@ class LocalBackend:
         self._jobs: "OrderedDict[Tuple[int, str], tuple]" = OrderedDict()
         self._busy = False
         self._errors: List[str] = []
-        self._last_touch: Dict[int, float] = {}     # driver id -> last write/keepalive time
+        self._last_touch: Dict[int, float] = {}  # driver id -> last write/keepalive time
         self._stop = False
         self._worker = threading.Thread(target=self._run, name="rgbdeck-io", daemon=True)
         self._worker.start()
@@ -117,8 +118,12 @@ class LocalBackend:
     def _keepalive_locked(self):
         """Called from the worker (holding _cv) when idle: ping drivers whose heartbeat interval elapsed."""
         now = time.monotonic()
-        due = [d for d in self._keepalive_drivers()
-               if now - self._last_touch.get(id(d), 0.0) >= max(0.02, float(getattr(d, "keepalive_interval", KEEPALIVE_INTERVAL)))]
+        due = [
+            d
+            for d in self._keepalive_drivers()
+            if now - self._last_touch.get(id(d), 0.0)
+            >= max(0.02, float(getattr(d, "keepalive_interval", KEEPALIVE_INTERVAL)))
+        ]
         if not due:
             return
         self._busy = True
@@ -198,8 +203,12 @@ class LocalBackend:
         errors = []
         with self._io_lock:
             for mod in discover_drivers():
+                experimental = bool(
+                    getattr(mod, "EXPERIMENTAL", mod.__name__.rsplit(".", 1)[-1] not in PREFERRED_DRIVERS)
+                )
                 try:
                     for drv in mod.probe():
+                        drv.device.experimental = experimental
                         self._adopt(drv, old)
                 except DeviceError as e:
                     errors.append(str(e))

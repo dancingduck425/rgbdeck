@@ -13,6 +13,7 @@ Reads (GPL-2.0, read only, never used at runtime):
 Usage:  python3 tools/gen_razer_table.py [path/to/OpenRGB]   (default ~/src/OpenRGB)
 Entries that cannot be parsed are skipped and counted; the output file is never hand-edited.
 """
+
 from __future__ import annotations
 
 import os
@@ -24,23 +25,74 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "rgbdeck", "hw", "razer_devices.py")
 
 # OpenRGB enum values (RGBController/RGBControllerInterface.h, RazerController.h, KeyboardLayoutManager.h)
-DEVICE_TYPES = ["MOTHERBOARD", "DRAM", "GPU", "COOLER", "LEDSTRIP", "KEYBOARD", "MOUSE", "MOUSEMAT", "HEADSET",
-                "HEADSET_STAND", "GAMEPAD", "LIGHT", "SPEAKER", "VIRTUAL", "STORAGE", "CASE", "MICROPHONE",
-                "ACCESSORY", "KEYPAD", "LAPTOP", "MONITOR", "UNKNOWN"]
+DEVICE_TYPES = [
+    "MOTHERBOARD",
+    "DRAM",
+    "GPU",
+    "COOLER",
+    "LEDSTRIP",
+    "KEYBOARD",
+    "MOUSE",
+    "MOUSEMAT",
+    "HEADSET",
+    "HEADSET_STAND",
+    "GAMEPAD",
+    "LIGHT",
+    "SPEAKER",
+    "VIRTUAL",
+    "STORAGE",
+    "CASE",
+    "MICROPHONE",
+    "ACCESSORY",
+    "KEYPAD",
+    "LAPTOP",
+    "MONITOR",
+    "UNKNOWN",
+]
 ZONE_TYPES = {"ZONE_TYPE_SINGLE": 0, "ZONE_TYPE_LINEAR": 1, "ZONE_TYPE_MATRIX": 2}
-MATRIX_TYPES = {"RAZER_MATRIX_TYPE_NONE": 0, "RAZER_MATRIX_TYPE_STANDARD": 1, "RAZER_MATRIX_TYPE_EXTENDED": 2,
-                "RAZER_MATRIX_TYPE_LINEAR": 3, "RAZER_MATRIX_TYPE_EXTENDED_ARGB": 4, "RAZER_MATRIX_TYPE_CUSTOM": 5}
-KEYBOARD_SIZES = {"KEYBOARD_SIZE_EMPTY": 0, "KEYBOARD_SIZE_FULL": 15, "KEYBOARD_SIZE_TKL": 7,
-                  "KEYBOARD_SIZE_SEVENTY_FIVE": 3, "KEYBOARD_SIZE_SIXTY": 1}
-KEYBOARD_LAYOUTS = {"KEYBOARD_LAYOUT_DEFAULT": 0, "KEYBOARD_LAYOUT_ANSI_QWERTY": 1, "KEYBOARD_LAYOUT_ISO_QWERTY": 2,
-                    "KEYBOARD_LAYOUT_ISO_QWERTZ": 3, "KEYBOARD_LAYOUT_ISO_AZERTY": 4, "KEYBOARD_LAYOUT_JIS": 5,
-                    "KEYBOARD_LAYOUT_ABNT2": 6}
-OPCODES = {"KEYBOARD_OPCODE_INSERT_SHIFT_RIGHT": 0, "KEYBOARD_OPCODE_SWAP_ONLY": 1,
-           "KEYBOARD_OPCODE_REMOVE_SHIFT_LEFT": 2, "KEYBOARD_OPCODE_INS_SHFT_ADJACENT": 3,
-           "KEYBOARD_OPCODE_INSERT_ROW": 4, "KEYBOARD_OPCODE_REMOVE_ROW": 5, "KEYBOARD_OPCODE_ADD_ALT_NAME": 6}
+MATRIX_TYPES = {
+    "RAZER_MATRIX_TYPE_NONE": 0,
+    "RAZER_MATRIX_TYPE_STANDARD": 1,
+    "RAZER_MATRIX_TYPE_EXTENDED": 2,
+    "RAZER_MATRIX_TYPE_LINEAR": 3,
+    "RAZER_MATRIX_TYPE_EXTENDED_ARGB": 4,
+    "RAZER_MATRIX_TYPE_CUSTOM": 5,
+}
+KEYBOARD_SIZES = {
+    "KEYBOARD_SIZE_EMPTY": 0,
+    "KEYBOARD_SIZE_FULL": 15,
+    "KEYBOARD_SIZE_TKL": 7,
+    "KEYBOARD_SIZE_SEVENTY_FIVE": 3,
+    "KEYBOARD_SIZE_SIXTY": 1,
+}
+KEYBOARD_LAYOUTS = {
+    "KEYBOARD_LAYOUT_DEFAULT": 0,
+    "KEYBOARD_LAYOUT_ANSI_QWERTY": 1,
+    "KEYBOARD_LAYOUT_ISO_QWERTY": 2,
+    "KEYBOARD_LAYOUT_ISO_QWERTZ": 3,
+    "KEYBOARD_LAYOUT_ISO_AZERTY": 4,
+    "KEYBOARD_LAYOUT_JIS": 5,
+    "KEYBOARD_LAYOUT_ABNT2": 6,
+}
+OPCODES = {
+    "KEYBOARD_OPCODE_INSERT_SHIFT_RIGHT": 0,
+    "KEYBOARD_OPCODE_SWAP_ONLY": 1,
+    "KEYBOARD_OPCODE_REMOVE_SHIFT_LEFT": 2,
+    "KEYBOARD_OPCODE_INS_SHFT_ADJACENT": 3,
+    "KEYBOARD_OPCODE_INSERT_ROW": 4,
+    "KEYBOARD_OPCODE_REMOVE_ROW": 5,
+    "KEYBOARD_OPCODE_ADD_ALT_NAME": 6,
+}
 # OpenRGB device_type -> RGB Deck type_name
-TYPE_NAMES = {"KEYBOARD": "Keyboard", "LAPTOP": "Keyboard", "MOUSE": "Mouse", "MOUSEMAT": "Mousemat",
-              "HEADSET": "Headset", "KEYPAD": "Keypad", "LEDSTRIP": "LED Strip"}
+TYPE_NAMES = {
+    "KEYBOARD": "Keyboard",
+    "LAPTOP": "Keyboard",
+    "MOUSE": "Mouse",
+    "MOUSEMAT": "Mousemat",
+    "HEADSET": "Headset",
+    "KEYPAD": "Keypad",
+    "LEDSTRIP": "LED Strip",
+}
 
 skipped: List[str] = []
 
@@ -62,7 +114,7 @@ def strip_comments(src: str) -> str:
             j = i + 1
             while j < n and src[j] != '"':
                 j += 2 if src[j] == "\\" else 1
-            out.append(src[i:j + 1])
+            out.append(src[i : j + 1])
             i = j + 1
         elif src.startswith("//", i):
             j = src.find("\n", i)
@@ -83,7 +135,7 @@ def unquote(tok: str) -> str:
 
 def tree(tokens: List[str], pos: int) -> Tuple[list, int]:
     """tokens[pos] == '{' -> nested python list of tokens/lists, position after the closing brace."""
-    assert tokens[pos] == "{", tokens[pos:pos + 5]
+    assert tokens[pos] == "{", tokens[pos : pos + 5]
     out: list = []
     pos += 1
     while tokens[pos] != "}":
@@ -171,8 +223,14 @@ def parse_klm(path: str, names: Dict[str, str]):
             continue
         base[block.replace("keyboard_zone_", "")] = key_rows(init, names)
     regional = {}
-    for var, layout in (("ansi_qwerty", 1), ("iso_qwerty", 2), ("iso_qwertz", 3), ("iso_azerty", 4), ("jis", 5),
-                        ("abnt2", 6)):
+    for var, layout in (
+        ("ansi_qwerty", 1),
+        ("iso_qwerty", 2),
+        ("iso_qwertz", 3),
+        ("iso_azerty", 4),
+        ("jis", 5),
+        ("abnt2", 6),
+    ):
         init = find_init(tokens, var)
         if init is None or len(init) < 2:
             skip(f"KLM regional overlay {var} not found")
@@ -190,7 +248,7 @@ def parse_layouts(tokens: List[str], names: Dict[str, str]) -> Dict[str, dict]:
             init = tree(tokens, i + 2)[0]
             try:
                 size = KEYBOARD_SIZES[init[0].split("::")[-1]]
-                values = init[1]                     # { {defaults}, { {LAYOUT, {rows}}, ... } }
+                values = init[1]  # { {defaults}, { {LAYOUT, {rows}}, ... } }
                 edits = init[2]
             except (KeyError, IndexError) as e:
                 skip(f"layout {lname}: {e}")
@@ -214,8 +272,12 @@ def parse_zones(tokens: List[str], names: Dict[str, str]) -> Dict[str, dict]:
             init = tree(tokens, i + 3)[0]
             try:
                 title = unquote(init[0]) if init[0].startswith('"') else names[init[0]]
-                zones[zname] = {"name": title, "type": ZONE_TYPES[init[1]], "rows": int(init[2], 0),
-                                "cols": int(init[3], 0)}
+                zones[zname] = {
+                    "name": title,
+                    "type": ZONE_TYPES[init[1]],
+                    "rows": int(init[2], 0),
+                    "cols": int(init[3], 0),
+                }
             except (KeyError, IndexError, ValueError) as e:
                 skip(f"zone {zname}: {e}")
     return zones
@@ -243,10 +305,17 @@ def parse_devices(tokens: List[str], pids: Dict[str, int], zones: Dict[str, dict
                 if layout is not None and layout not in layouts:
                     raise KeyError(layout)
                 devices[dname] = {
-                    "name": name, "pid": pids[pid_macro], "pid_macro": pid_macro, "device_type": dtype,
-                    "type": TYPE_NAMES.get(dtype, "Accessory"), "matrix_type": MATRIX_TYPES[init[3]],
-                    "transaction_id": int(init[4], 0), "rows": int(init[5], 0), "cols": int(init[6], 0),
-                    "zones": zone_list, "layout": layout,
+                    "name": name,
+                    "pid": pids[pid_macro],
+                    "pid_macro": pid_macro,
+                    "device_type": dtype,
+                    "type": TYPE_NAMES.get(dtype, "Accessory"),
+                    "matrix_type": MATRIX_TYPES[init[3]],
+                    "transaction_id": int(init[4], 0),
+                    "rows": int(init[5], 0),
+                    "cols": int(init[6], 0),
+                    "zones": zone_list,
+                    "layout": layout,
                 }
             except (KeyError, IndexError, ValueError) as e:
                 skip(f"device {dname}: {e}")
@@ -268,7 +337,9 @@ def parse_master_list(tokens: List[str]) -> List[str]:
 
 
 # ---------------------------------------------------------------- RazerControllerDetect.cpp
-def parse_detect(path: str, pids: Dict[str, int]) -> Dict[int, List[Tuple[Optional[int], Optional[int], Optional[int]]]]:
+def parse_detect(
+    path: str, pids: Dict[str, int]
+) -> Dict[int, List[Tuple[Optional[int], Optional[int], Optional[int]]]]:
     """pid -> [(interface or None, usage_page or None, usage or None)], for DetectRazerControllers only."""
     rules: Dict[int, list] = {}
     in_win32 = False
@@ -286,7 +357,9 @@ def parse_detect(path: str, pids: Dict[str, int]) -> Dict[int, List[Tuple[Option
             continue
         if in_win32:
             continue
-        m = re.match(r'REGISTER_HID_DETECTOR_(IPU|PU|I)\s*\(\s*"[^"]*"\s*,\s*(\w+)\s*,\s*(\w+)\s*,\s*(\w+)\s*,([^)]*)\)', s)
+        m = re.match(
+            r'REGISTER_HID_DETECTOR_(IPU|PU|I)\s*\(\s*"[^"]*"\s*,\s*(\w+)\s*,\s*(\w+)\s*,\s*(\w+)\s*,([^)]*)\)', s
+        )
         if not m:
             continue
         kind, detector, vid, pid_macro, rest = m.groups()
@@ -409,7 +482,7 @@ def main():
     w("# RAZER_<name>_PID macros from RazerDevices.h (name without the RAZER_ prefix and _PID suffix)")
     w("PIDS = {")
     for macro, pid in sorted(pids.items(), key=lambda kv: kv[0]):
-        w(f"    {py_str(macro[len('RAZER_'):-len('_PID')])}: 0x{pid:04X},")
+        w(f"    {py_str(macro[len('RAZER_') : -len('_PID')])}: 0x{pid:04X},")
     w("}")
     w("")
     w("# Per-PID quirks ported from RazerController.cpp switch blocks")
@@ -455,12 +528,18 @@ def main():
     w("DEVICES = {")
     for pid, d in table.items():
         w(f"    0x{pid:04X}: {{")
-        w(f"        'name': {py_str(d['name'])}, 'type': {py_str(d['type'])}, 'device_type': {py_str(d['device_type'])},")
-        w(f"        'matrix_type': {d['matrix_type']}, 'transaction_id': 0x{d['transaction_id']:02X}, "
-          f"'rows': {d['rows']}, 'cols': {d['cols']},")
+        w(
+            f"        'name': {py_str(d['name'])}, 'type': {py_str(d['type'])}, 'device_type': {py_str(d['device_type'])},"
+        )
+        w(
+            f"        'matrix_type': {d['matrix_type']}, 'transaction_id': 0x{d['transaction_id']:02X}, "
+            f"'rows': {d['rows']}, 'cols': {d['cols']},"
+        )
         w("        'zones': [")
         for z in d["zones"]:
-            w(f"            {{'name': {py_str(z['name'])}, 'type': {z['type']}, 'rows': {z['rows']}, 'cols': {z['cols']}}},")
+            w(
+                f"            {{'name': {py_str(z['name'])}, 'type': {z['type']}, 'rows': {z['rows']}, 'cols': {z['cols']}}},"
+            )
         w("        ],")
         w(f"        'layout': {py_str(d['layout']) if d['layout'] else None},")
         w(f"        'detect': {d['detect']!r},")

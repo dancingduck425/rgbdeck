@@ -1,21 +1,35 @@
 """Glorious Model O / D Wireless (Sinowealth) mouse driver: feature reports on the vendor interface."""
+
 from __future__ import annotations
 
 import time
 from typing import List, Optional, Tuple
 
-from rgbdeck.models import (Device, DeviceError, Mode, MODE_COLORS_MODE_SPECIFIC, MODE_COLORS_NONE,
-                    MODE_FLAG_AUTOMATIC_SAVE, MODE_FLAG_HAS_BRIGHTNESS, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
-                    MODE_FLAG_HAS_SPEED, u32_to_rgb)
+from rgbdeck.models import (
+    Device,
+    DeviceError,
+    Mode,
+    MODE_COLORS_MODE_SPECIFIC,
+    MODE_COLORS_NONE,
+    MODE_FLAG_AUTOMATIC_SAVE,
+    MODE_FLAG_HAS_BRIGHTNESS,
+    MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
+    MODE_FLAG_HAS_SPEED,
+    u32_to_rgb,
+)
 from rgbdeck.hw.hidraw import HidDevice, enumerate_hid
 
 VID = 0x258A
-PIDS = {0x2011: ("Glorious Model O Wireless", True), 0x2022: ("Glorious Model O Wireless", False),
-        0x2012: ("Glorious Model D Wireless", True), 0x2023: ("Glorious Model D Wireless", False)}
+PIDS = {
+    0x2011: ("Glorious Model O Wireless", True),
+    0x2022: ("Glorious Model O Wireless", False),
+    0x2012: ("Glorious Model D Wireless", True),
+    0x2023: ("Glorious Model D Wireless", False),
+}
 PKT = 65
 
 M_OFF, M_RAINBOW, M_CYCLE, M_CBREATH, M_STATIC, M_BREATH, M_TAIL, M_RAVE, M_WAVE = range(9)
-SPEED1 = (0x14, 0x0B, 0x01)      # min, mid, max  (lower byte = faster)
+SPEED1 = (0x14, 0x0B, 0x01)  # min, mid, max  (lower byte = faster)
 SPEED2 = (0xC8, 0x6E, 0x0A)
 BRIGHT = (0x00, 0x7F, 0xFF)
 
@@ -50,27 +64,158 @@ class GloriousMouse:
         A = MODE_FLAG_AUTOMATIC_SAVE
         modes = [
             Mode(0, "Off", M_OFF, A),
-            Mode(1, "Rainbow Wave", M_RAINBOW, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | A, SPEED1[0], SPEED1[2],
-                 BRIGHT[0], BRIGHT[2], 0, 0, SPEED1[1], BRIGHT[1], 2, MODE_COLORS_NONE, []),
-            Mode(2, "Spectrum Cycle", M_CYCLE, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | A, SPEED1[0], SPEED1[2],
-                 BRIGHT[0], BRIGHT[2], 0, 0, SPEED1[1], BRIGHT[1], 0, MODE_COLORS_NONE, []),
-            Mode(3, "Custom Breathing", M_CBREATH, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_BRIGHTNESS | MODE_FLAG_HAS_SPEED | A,
-                 SPEED1[0], SPEED1[2], BRIGHT[0], BRIGHT[2], 2, 7, SPEED1[1], BRIGHT[1], 0, MODE_COLORS_MODE_SPECIFIC,
-                 [0x00B4FF, 0xFF00FF]),
-            Mode(4, "Static", M_STATIC, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_BRIGHTNESS | A,
-                 0, 0, BRIGHT[0], BRIGHT[2], 1, 1, 0, BRIGHT[1], 0, MODE_COLORS_MODE_SPECIFIC, [0x00B4FF]),
-            Mode(5, "Breathing", M_BREATH, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_BRIGHTNESS | A,
-                 SPEED1[0], SPEED1[2], BRIGHT[0], BRIGHT[2], 1, 1, SPEED1[1], BRIGHT[1], 0, MODE_COLORS_MODE_SPECIFIC, [0x00B4FF]),
-            Mode(6, "Tail", M_TAIL, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | A, SPEED1[0], SPEED1[2],
-                 BRIGHT[0], BRIGHT[2], 0, 0, SPEED1[1], BRIGHT[1], 0, MODE_COLORS_NONE, []),
-            Mode(7, "Rave", M_RAVE, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_BRIGHTNESS | A,
-                 SPEED2[0], SPEED2[2], BRIGHT[0], BRIGHT[2], 1, 2, SPEED2[1], BRIGHT[1], 0, MODE_COLORS_MODE_SPECIFIC,
-                 [0x00B4FF, 0xFF00FF]),
-            Mode(8, "Wave", M_WAVE, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | A, SPEED2[0], SPEED2[2],
-                 BRIGHT[0], BRIGHT[2], 0, 0, SPEED2[1], BRIGHT[1], 0, MODE_COLORS_NONE, []),
+            Mode(
+                1,
+                "Rainbow Wave",
+                M_RAINBOW,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | A,
+                SPEED1[0],
+                SPEED1[2],
+                BRIGHT[0],
+                BRIGHT[2],
+                0,
+                0,
+                SPEED1[1],
+                BRIGHT[1],
+                2,
+                MODE_COLORS_NONE,
+                [],
+            ),
+            Mode(
+                2,
+                "Spectrum Cycle",
+                M_CYCLE,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | A,
+                SPEED1[0],
+                SPEED1[2],
+                BRIGHT[0],
+                BRIGHT[2],
+                0,
+                0,
+                SPEED1[1],
+                BRIGHT[1],
+                0,
+                MODE_COLORS_NONE,
+                [],
+            ),
+            Mode(
+                3,
+                "Custom Breathing",
+                M_CBREATH,
+                MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_BRIGHTNESS | MODE_FLAG_HAS_SPEED | A,
+                SPEED1[0],
+                SPEED1[2],
+                BRIGHT[0],
+                BRIGHT[2],
+                2,
+                7,
+                SPEED1[1],
+                BRIGHT[1],
+                0,
+                MODE_COLORS_MODE_SPECIFIC,
+                [0x00B4FF, 0xFF00FF],
+            ),
+            Mode(
+                4,
+                "Static",
+                M_STATIC,
+                MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_BRIGHTNESS | A,
+                0,
+                0,
+                BRIGHT[0],
+                BRIGHT[2],
+                1,
+                1,
+                0,
+                BRIGHT[1],
+                0,
+                MODE_COLORS_MODE_SPECIFIC,
+                [0x00B4FF],
+            ),
+            Mode(
+                5,
+                "Breathing",
+                M_BREATH,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_BRIGHTNESS | A,
+                SPEED1[0],
+                SPEED1[2],
+                BRIGHT[0],
+                BRIGHT[2],
+                1,
+                1,
+                SPEED1[1],
+                BRIGHT[1],
+                0,
+                MODE_COLORS_MODE_SPECIFIC,
+                [0x00B4FF],
+            ),
+            Mode(
+                6,
+                "Tail",
+                M_TAIL,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | A,
+                SPEED1[0],
+                SPEED1[2],
+                BRIGHT[0],
+                BRIGHT[2],
+                0,
+                0,
+                SPEED1[1],
+                BRIGHT[1],
+                0,
+                MODE_COLORS_NONE,
+                [],
+            ),
+            Mode(
+                7,
+                "Rave",
+                M_RAVE,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_BRIGHTNESS | A,
+                SPEED2[0],
+                SPEED2[2],
+                BRIGHT[0],
+                BRIGHT[2],
+                1,
+                2,
+                SPEED2[1],
+                BRIGHT[1],
+                0,
+                MODE_COLORS_MODE_SPECIFIC,
+                [0x00B4FF, 0xFF00FF],
+            ),
+            Mode(
+                8,
+                "Wave",
+                M_WAVE,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | A,
+                SPEED2[0],
+                SPEED2[2],
+                BRIGHT[0],
+                BRIGHT[2],
+                0,
+                0,
+                SPEED2[1],
+                BRIGHT[1],
+                0,
+                MODE_COLORS_NONE,
+                [],
+            ),
         ]
-        return Device(0, "Mouse", name, "Glorious", "Sinowealth wireless mouse (direct hidraw)" +
-                      ("" if self.cable else " via dongle"), self.version, "", "HID: " + path, 4, modes, [], [], [])
+        return Device(
+            0,
+            "Mouse",
+            name,
+            "Glorious",
+            "Sinowealth wireless mouse (direct hidraw)" + ("" if self.cable else " via dongle"),
+            self.version,
+            "",
+            "HID: " + path,
+            4,
+            modes,
+            [],
+            [],
+            [],
+        )
 
     def set_colors(self, colors: List[int]):
         pass  # no per-LED control on this mouse
@@ -110,8 +255,10 @@ class GloriousMouse:
         mode_buf = bytearray(PKT)
         mode_buf[3], mode_buf[5], mode_buf[7], mode_buf[8] = 0x02, 0x02, profile, 0xFF
         mode_buf[9] = mode.value
-        cols = [tuple(max(1, c) if i == 0 else c for i, c in enumerate(u32_to_rgb(x))) if x == 0 else u32_to_rgb(x)
-                for x in mode.colors]
+        cols = [
+            tuple(max(1, c) if i == 0 else c for i, c in enumerate(u32_to_rgb(x))) if x == 0 else u32_to_rgb(x)
+            for x in mode.colors
+        ]
         v, speed = mode.value, mode.speed & 0xFF
         if v in (M_RAINBOW, M_TAIL, M_WAVE):
             mode_buf[4] = 0x05
@@ -124,8 +271,8 @@ class GloriousMouse:
             mode_buf[4] = len(cols) * 3 + 5
             mode_buf[0x0B] = speed
             for i, (r, g, b) in enumerate(cols):
-                mode_buf[0x0C + 3 * i:0x0C + 3 * i + 3] = (r, g, b)
-        elif v == M_STATIC:                      # layout as Glorious CORE sends it (mxw "Solid")
+                mode_buf[0x0C + 3 * i : 0x0C + 3 * i + 3] = (r, g, b)
+        elif v == M_STATIC:  # layout as Glorious CORE sends it (mxw "Solid")
             mode_buf[4] = 0x08
             r, g, b = cols[0] if cols else (1, 0, 0)
             mode_buf[0x0C:0x0F] = (r, g, b)

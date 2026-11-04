@@ -4,6 +4,7 @@ Software (app-driven) keyboard effects: reactive key glow and ripples.
 Key presses come from evdev (/dev/input/event*). Frames are rendered onto the
 user's own per-key colors and pushed to the keyboard at a capped rate.
 """
+
 from __future__ import annotations
 
 import colorsys
@@ -27,20 +28,61 @@ EV_KEY = 0x01
 
 # evdev KEY_* name -> LED name (after "Key: ")
 KEYMAP: Dict[str, str] = {
-    "KEY_ESC": "Escape", "KEY_GRAVE": "`", "KEY_MINUS": "-", "KEY_EQUAL": "=", "KEY_BACKSPACE": "Backspace",
-    "KEY_TAB": "Tab", "KEY_LEFTBRACE": "[", "KEY_RIGHTBRACE": "]", "KEY_BACKSLASH": "\\ (ANSI)",
-    "KEY_CAPSLOCK": "Caps Lock", "KEY_SEMICOLON": ";", "KEY_APOSTROPHE": "'", "KEY_ENTER": "Enter",
-    "KEY_LEFTSHIFT": "Left Shift", "KEY_COMMA": ",", "KEY_DOT": ".", "KEY_SLASH": "/", "KEY_RIGHTSHIFT": "Right Shift",
-    "KEY_LEFTCTRL": "Left Control", "KEY_LEFTMETA": "Left Windows", "KEY_LEFTALT": "Left Alt", "KEY_SPACE": "Space",
-    "KEY_RIGHTALT": "Right Alt", "KEY_RIGHTMETA": "Right Windows", "KEY_COMPOSE": "Menu", "KEY_RIGHTCTRL": "Right Control",
-    "KEY_SYSRQ": "Print Screen", "KEY_SCROLLLOCK": "Scroll Lock", "KEY_PAUSE": "Pause/Break",
-    "KEY_INSERT": "Insert", "KEY_HOME": "Home", "KEY_PAGEUP": "Page Up", "KEY_DELETE": "Delete", "KEY_END": "End",
-    "KEY_PAGEDOWN": "Page Down", "KEY_UP": "Up Arrow", "KEY_DOWN": "Down Arrow", "KEY_LEFT": "Left Arrow",
-    "KEY_RIGHT": "Right Arrow", "KEY_NUMLOCK": "Num Lock", "KEY_KPSLASH": "Number Pad /", "KEY_KPASTERISK": "Number Pad *",
-    "KEY_KPMINUS": "Number Pad -", "KEY_KPPLUS": "Number Pad +", "KEY_KPENTER": "Number Pad Enter",
-    "KEY_KPDOT": "Number Pad .", "KEY_FN": "Right Fn", "KEY_102ND": "\\ (ISO)", "KEY_RO": "Ro (JIS)",
-    "KEY_YEN": "Yen (JIS)", "KEY_HENKAN": "Henkan (JIS)", "KEY_MUHENKAN": "Muhenkan (JIS)",
-    "KEY_KATAKANAHIRAGANA": "Katakana/Hiragana (JIS)", "KEY_KPEQUAL": "Number Pad =", "KEY_KPCOMMA": "Number Pad ,",
+    "KEY_ESC": "Escape",
+    "KEY_GRAVE": "`",
+    "KEY_MINUS": "-",
+    "KEY_EQUAL": "=",
+    "KEY_BACKSPACE": "Backspace",
+    "KEY_TAB": "Tab",
+    "KEY_LEFTBRACE": "[",
+    "KEY_RIGHTBRACE": "]",
+    "KEY_BACKSLASH": "\\ (ANSI)",
+    "KEY_CAPSLOCK": "Caps Lock",
+    "KEY_SEMICOLON": ";",
+    "KEY_APOSTROPHE": "'",
+    "KEY_ENTER": "Enter",
+    "KEY_LEFTSHIFT": "Left Shift",
+    "KEY_COMMA": ",",
+    "KEY_DOT": ".",
+    "KEY_SLASH": "/",
+    "KEY_RIGHTSHIFT": "Right Shift",
+    "KEY_LEFTCTRL": "Left Control",
+    "KEY_LEFTMETA": "Left Windows",
+    "KEY_LEFTALT": "Left Alt",
+    "KEY_SPACE": "Space",
+    "KEY_RIGHTALT": "Right Alt",
+    "KEY_RIGHTMETA": "Right Windows",
+    "KEY_COMPOSE": "Menu",
+    "KEY_RIGHTCTRL": "Right Control",
+    "KEY_SYSRQ": "Print Screen",
+    "KEY_SCROLLLOCK": "Scroll Lock",
+    "KEY_PAUSE": "Pause/Break",
+    "KEY_INSERT": "Insert",
+    "KEY_HOME": "Home",
+    "KEY_PAGEUP": "Page Up",
+    "KEY_DELETE": "Delete",
+    "KEY_END": "End",
+    "KEY_PAGEDOWN": "Page Down",
+    "KEY_UP": "Up Arrow",
+    "KEY_DOWN": "Down Arrow",
+    "KEY_LEFT": "Left Arrow",
+    "KEY_RIGHT": "Right Arrow",
+    "KEY_NUMLOCK": "Num Lock",
+    "KEY_KPSLASH": "Number Pad /",
+    "KEY_KPASTERISK": "Number Pad *",
+    "KEY_KPMINUS": "Number Pad -",
+    "KEY_KPPLUS": "Number Pad +",
+    "KEY_KPENTER": "Number Pad Enter",
+    "KEY_KPDOT": "Number Pad .",
+    "KEY_FN": "Right Fn",
+    "KEY_102ND": "\\ (ISO)",
+    "KEY_RO": "Ro (JIS)",
+    "KEY_YEN": "Yen (JIS)",
+    "KEY_HENKAN": "Henkan (JIS)",
+    "KEY_MUHENKAN": "Muhenkan (JIS)",
+    "KEY_KATAKANAHIRAGANA": "Katakana/Hiragana (JIS)",
+    "KEY_KPEQUAL": "Number Pad =",
+    "KEY_KPCOMMA": "Number Pad ,",
 }
 for _n in range(13, 25):
     KEYMAP[f"KEY_F{_n}"] = f"F{_n}"
@@ -51,10 +93,136 @@ for _n in range(10):
     KEYMAP[f"KEY_KP{_n}"] = f"Number Pad {_n}"
 for _n in range(1, 13):
     KEYMAP[f"KEY_F{_n}"] = f"F{_n}"
-ALIASES = {"Right Windows": "Right Fn"}   # boards without a right Win key put Fn there (G513)
+ALIASES = {"Right Windows": "Right Fn"}  # boards without a right Win key put Fn there (G513)
 
 
-EVDEV_CODES: Dict[int, str] = {1: 'KEY_ESC', 2: 'KEY_1', 3: 'KEY_2', 4: 'KEY_3', 5: 'KEY_4', 6: 'KEY_5', 7: 'KEY_6', 8: 'KEY_7', 9: 'KEY_8', 10: 'KEY_9', 11: 'KEY_0', 12: 'KEY_MINUS', 13: 'KEY_EQUAL', 14: 'KEY_BACKSPACE', 15: 'KEY_TAB', 16: 'KEY_Q', 17: 'KEY_W', 18: 'KEY_E', 19: 'KEY_R', 20: 'KEY_T', 21: 'KEY_Y', 22: 'KEY_U', 23: 'KEY_I', 24: 'KEY_O', 25: 'KEY_P', 26: 'KEY_LEFTBRACE', 27: 'KEY_RIGHTBRACE', 28: 'KEY_ENTER', 29: 'KEY_LEFTCTRL', 30: 'KEY_A', 31: 'KEY_S', 32: 'KEY_D', 33: 'KEY_F', 34: 'KEY_G', 35: 'KEY_H', 36: 'KEY_J', 37: 'KEY_K', 38: 'KEY_L', 39: 'KEY_SEMICOLON', 40: 'KEY_APOSTROPHE', 41: 'KEY_GRAVE', 42: 'KEY_LEFTSHIFT', 43: 'KEY_BACKSLASH', 44: 'KEY_Z', 45: 'KEY_X', 46: 'KEY_C', 47: 'KEY_V', 48: 'KEY_B', 49: 'KEY_N', 50: 'KEY_M', 51: 'KEY_COMMA', 52: 'KEY_DOT', 53: 'KEY_SLASH', 54: 'KEY_RIGHTSHIFT', 55: 'KEY_KPASTERISK', 56: 'KEY_LEFTALT', 57: 'KEY_SPACE', 58: 'KEY_CAPSLOCK', 59: 'KEY_F1', 60: 'KEY_F2', 61: 'KEY_F3', 62: 'KEY_F4', 63: 'KEY_F5', 64: 'KEY_F6', 65: 'KEY_F7', 66: 'KEY_F8', 67: 'KEY_F9', 68: 'KEY_F10', 69: 'KEY_NUMLOCK', 70: 'KEY_SCROLLLOCK', 71: 'KEY_KP7', 72: 'KEY_KP8', 73: 'KEY_KP9', 74: 'KEY_KPMINUS', 75: 'KEY_KP4', 76: 'KEY_KP5', 77: 'KEY_KP6', 78: 'KEY_KPPLUS', 79: 'KEY_KP1', 80: 'KEY_KP2', 81: 'KEY_KP3', 82: 'KEY_KP0', 83: 'KEY_KPDOT', 86: 'KEY_102ND', 87: 'KEY_F11', 88: 'KEY_F12', 89: 'KEY_RO', 92: 'KEY_HENKAN', 93: 'KEY_KATAKANAHIRAGANA', 94: 'KEY_MUHENKAN', 96: 'KEY_KPENTER', 97: 'KEY_RIGHTCTRL', 98: 'KEY_KPSLASH', 99: 'KEY_SYSRQ', 100: 'KEY_RIGHTALT', 102: 'KEY_HOME', 103: 'KEY_UP', 104: 'KEY_PAGEUP', 105: 'KEY_LEFT', 106: 'KEY_RIGHT', 107: 'KEY_END', 108: 'KEY_DOWN', 109: 'KEY_PAGEDOWN', 110: 'KEY_INSERT', 111: 'KEY_DELETE', 117: 'KEY_KPEQUAL', 119: 'KEY_PAUSE', 121: 'KEY_KPCOMMA', 124: 'KEY_YEN', 125: 'KEY_LEFTMETA', 126: 'KEY_RIGHTMETA', 127: 'KEY_COMPOSE', 183: 'KEY_F13', 184: 'KEY_F14', 185: 'KEY_F15', 186: 'KEY_F16', 187: 'KEY_F17', 188: 'KEY_F18', 189: 'KEY_F19', 190: 'KEY_F20', 191: 'KEY_F21', 192: 'KEY_F22', 193: 'KEY_F23', 194: 'KEY_F24', 464: 'KEY_FN'}
+EVDEV_CODES: Dict[int, str] = {
+    1: "KEY_ESC",
+    2: "KEY_1",
+    3: "KEY_2",
+    4: "KEY_3",
+    5: "KEY_4",
+    6: "KEY_5",
+    7: "KEY_6",
+    8: "KEY_7",
+    9: "KEY_8",
+    10: "KEY_9",
+    11: "KEY_0",
+    12: "KEY_MINUS",
+    13: "KEY_EQUAL",
+    14: "KEY_BACKSPACE",
+    15: "KEY_TAB",
+    16: "KEY_Q",
+    17: "KEY_W",
+    18: "KEY_E",
+    19: "KEY_R",
+    20: "KEY_T",
+    21: "KEY_Y",
+    22: "KEY_U",
+    23: "KEY_I",
+    24: "KEY_O",
+    25: "KEY_P",
+    26: "KEY_LEFTBRACE",
+    27: "KEY_RIGHTBRACE",
+    28: "KEY_ENTER",
+    29: "KEY_LEFTCTRL",
+    30: "KEY_A",
+    31: "KEY_S",
+    32: "KEY_D",
+    33: "KEY_F",
+    34: "KEY_G",
+    35: "KEY_H",
+    36: "KEY_J",
+    37: "KEY_K",
+    38: "KEY_L",
+    39: "KEY_SEMICOLON",
+    40: "KEY_APOSTROPHE",
+    41: "KEY_GRAVE",
+    42: "KEY_LEFTSHIFT",
+    43: "KEY_BACKSLASH",
+    44: "KEY_Z",
+    45: "KEY_X",
+    46: "KEY_C",
+    47: "KEY_V",
+    48: "KEY_B",
+    49: "KEY_N",
+    50: "KEY_M",
+    51: "KEY_COMMA",
+    52: "KEY_DOT",
+    53: "KEY_SLASH",
+    54: "KEY_RIGHTSHIFT",
+    55: "KEY_KPASTERISK",
+    56: "KEY_LEFTALT",
+    57: "KEY_SPACE",
+    58: "KEY_CAPSLOCK",
+    59: "KEY_F1",
+    60: "KEY_F2",
+    61: "KEY_F3",
+    62: "KEY_F4",
+    63: "KEY_F5",
+    64: "KEY_F6",
+    65: "KEY_F7",
+    66: "KEY_F8",
+    67: "KEY_F9",
+    68: "KEY_F10",
+    69: "KEY_NUMLOCK",
+    70: "KEY_SCROLLLOCK",
+    71: "KEY_KP7",
+    72: "KEY_KP8",
+    73: "KEY_KP9",
+    74: "KEY_KPMINUS",
+    75: "KEY_KP4",
+    76: "KEY_KP5",
+    77: "KEY_KP6",
+    78: "KEY_KPPLUS",
+    79: "KEY_KP1",
+    80: "KEY_KP2",
+    81: "KEY_KP3",
+    82: "KEY_KP0",
+    83: "KEY_KPDOT",
+    86: "KEY_102ND",
+    87: "KEY_F11",
+    88: "KEY_F12",
+    89: "KEY_RO",
+    92: "KEY_HENKAN",
+    93: "KEY_KATAKANAHIRAGANA",
+    94: "KEY_MUHENKAN",
+    96: "KEY_KPENTER",
+    97: "KEY_RIGHTCTRL",
+    98: "KEY_KPSLASH",
+    99: "KEY_SYSRQ",
+    100: "KEY_RIGHTALT",
+    102: "KEY_HOME",
+    103: "KEY_UP",
+    104: "KEY_PAGEUP",
+    105: "KEY_LEFT",
+    106: "KEY_RIGHT",
+    107: "KEY_END",
+    108: "KEY_DOWN",
+    109: "KEY_PAGEDOWN",
+    110: "KEY_INSERT",
+    111: "KEY_DELETE",
+    117: "KEY_KPEQUAL",
+    119: "KEY_PAUSE",
+    121: "KEY_KPCOMMA",
+    124: "KEY_YEN",
+    125: "KEY_LEFTMETA",
+    126: "KEY_RIGHTMETA",
+    127: "KEY_COMPOSE",
+    183: "KEY_F13",
+    184: "KEY_F14",
+    185: "KEY_F15",
+    186: "KEY_F16",
+    187: "KEY_F17",
+    188: "KEY_F18",
+    189: "KEY_F19",
+    190: "KEY_F20",
+    191: "KEY_F21",
+    192: "KEY_F22",
+    193: "KEY_F23",
+    194: "KEY_F24",
+    464: "KEY_FN",
+}
 
 
 def _evdev_code_names() -> Dict[int, str]:
@@ -62,6 +230,7 @@ def _evdev_code_names() -> Dict[int, str]:
     out = dict(EVDEV_CODES)
     try:
         from evdev import ecodes  # type: ignore
+
         for code, name in ecodes.KEY.items():
             out.setdefault(code, name if isinstance(name, str) else name[0])
     except ImportError:
@@ -130,12 +299,12 @@ class KeyListener(threading.Thread):
 
 @dataclass
 class EffectSettings:
-    kind: str = "ripple"          # "ripple" | "glow" | "ripple+glow"
+    kind: str = "ripple"  # "ripple" | "glow" | "ripple+glow"
     color_source: str = "active"  # "active" | "rainbow" | "random" | "key"
-    speed: int = 60               # percent
-    size: int = 50                # ring thickness percent
-    fade: int = 50                # glow duration percent
-    background: str = "colors"    # "colors" | "black" | "dim"
+    speed: int = 60  # percent
+    size: int = 50  # ring thickness percent
+    fade: int = 50  # glow duration percent
+    background: str = "colors"  # "colors" | "black" | "dim"
     fps: int = 24
 
     def to_dict(self):
@@ -171,9 +340,13 @@ class EffectEngine:
     tick() returns a frame (list of u32) when something changed, else None.
     """
 
-    def __init__(self, positions: Dict[int, Tuple[float, float]], name_to_led: Dict[str, int],
-                 active_color: Callable[[], Tuple[int, int, int]]):
-        self.positions = positions          # led -> (x, y) in key units (centres)
+    def __init__(
+        self,
+        positions: Dict[int, Tuple[float, float]],
+        name_to_led: Dict[str, int],
+        active_color: Callable[[], Tuple[int, int, int]],
+    ):
+        self.positions = positions  # led -> (x, y) in key units (centres)
         self.name_to_led = name_to_led
         self.active_color = active_color
         self.settings = EffectSettings()
@@ -236,8 +409,8 @@ class EffectEngine:
     def tick(self, now: Optional[float] = None) -> Optional[List[int]]:
         now = time.monotonic() if now is None else now
         s = self.settings
-        speed = 4.0 + s.speed / 100.0 * 26.0          # key-units per second
-        thickness = 0.8 + s.size / 100.0 * 3.2         # ring thickness in key units
+        speed = 4.0 + s.speed / 100.0 * 26.0  # key-units per second
+        thickness = 0.8 + s.size / 100.0 * 3.2  # ring thickness in key units
         life = (self._extent + thickness) / speed
         glow_life = 0.25 + s.fade / 100.0 * 2.0
         with self._lock:
@@ -249,8 +422,11 @@ class EffectEngine:
             if self._idle_sent:
                 return None
             self._idle_sent = True
-            return list(self.background) if s.background == "colors" else [
-                rgb_to_u32(*(int(c) for c in self._bg(i))) for i in range(self._n)]
+            return (
+                list(self.background)
+                if s.background == "colors"
+                else [rgb_to_u32(*(int(c) for c in self._bg(i))) for i in range(self._n)]
+            )
         self._idle_sent = False
         frame = []
         for led in range(self._n):

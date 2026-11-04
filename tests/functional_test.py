@@ -1,4 +1,5 @@
 """Drive MainWindow offscreen against the real devices (standalone backend) and check hardware state."""
+
 import os
 import sys
 import json
@@ -35,6 +36,7 @@ def pump(ms=250):
 class _View:
     def __init__(self, dev, colors):
         self.dev, self.colors = dev, colors
+
     def __getattr__(self, k):
         return getattr(self.dev, k)
 
@@ -75,12 +77,18 @@ s = fresh()
 check(all(c == 0x006AFF for c in s["Keyboard"].colors), "sync color: every keyboard key is #FF6A00")
 check(s["Keyboard"].current_mode.color_mode == MODE_COLORS_PER_LED, "keyboard switched to Direct")
 mm = s["Mouse"].current_mode
-check(mm.name == "Static" and mm.colors and mm.colors[0] == 0x006AFF, f"mouse switched to Static #FF6A00 (got {mm.name} {[hex(c) for c in mm.colors]})")
-check(s["Motherboard"].colors == [0x006AFF] or s["Motherboard"].current_mode.colors == [0x006AFF], "motherboard took #FF6A00")
+check(
+    mm.name == "Static" and mm.colors and mm.colors[0] == 0x006AFF,
+    f"mouse switched to Static #FF6A00 (got {mm.name} {[hex(c) for c in mm.colors]})",
+)
+check(
+    s["Motherboard"].colors == [0x006AFF] or s["Motherboard"].current_mode.colors == [0x006AFF],
+    "motherboard took #FF6A00",
+)
 
 # 2. paint keys
 w._set_interaction("paint")
-w.color_panel.setColor(QColor("#00ff00"), emit=True)   # only sets brush in paint mode
+w.color_panel.setColor(QColor("#00ff00"), emit=True)  # only sets brush in paint mode
 pump(200)
 s = fresh()
 check(all(c == 0x006AFF for c in s["Keyboard"].colors), "paint mode: changing color does not repaint the board")
@@ -110,12 +118,17 @@ pump(200)
 s = fresh()
 check(len(set(s["Keyboard"].colors)) > 20, "rainbow produced many colors")
 w.grab().save(str(OUT / "render_rainbow.png"))
-w.grad_a.setColor(QColor("#ff0000")); w.grad_b.setColor(QColor("#0000ff"))
+w.grad_a.setColor(QColor("#ff0000"))
+w.grad_b.setColor(QColor("#0000ff"))
 w._gradient("v")
 pump(200)
 s = fresh()
-esc = kb.led_names.index("Key: Escape"); spc = kb.led_names.index("Key: Space")
-check(u32_to_rgb(s["Keyboard"].colors[esc])[0] > 200 and u32_to_rgb(s["Keyboard"].colors[spc])[2] > 200, "vertical gradient red top -> blue bottom")
+esc = kb.led_names.index("Key: Escape")
+spc = kb.led_names.index("Key: Space")
+check(
+    u32_to_rgb(s["Keyboard"].colors[esc])[0] > 200 and u32_to_rgb(s["Keyboard"].colors[spc])[2] > 200,
+    "vertical gradient red top -> blue bottom",
+)
 w.dim_slider.setValue(50)
 pump(200)
 s = fresh()
@@ -130,7 +143,8 @@ pump(200)
 s = fresh()
 check(s["Keyboard"].current_mode.name == "Breathing", "keyboard effect -> Breathing")
 check(s["Keyboard"].current_mode.colors[0] != 0, "breathing got a non-black color automatically")
-w.effects.speed.setValue(25); w.effects._param_changed()
+w.effects.speed.setValue(25)
+w.effects._param_changed()
 pump(200)
 s = fresh()
 check(s["Keyboard"].current_mode.speed == 25, "speed slider applied")
@@ -170,8 +184,12 @@ check(s["Mouse"].active_mode == snap["devices"][mouse.index]["active_mode"], "pr
 w._everything_off()
 pump(200)
 client.wait_idle()
-r = subprocess.run([sys.executable, "-m", "rgbdeck", "--apply", "__test__"], capture_output=True, text=True,
-                   cwd=str(Path(__file__).resolve().parents[1]))
+r = subprocess.run(
+    [sys.executable, "-m", "rgbdeck", "--apply", "__test__"],
+    capture_output=True,
+    text=True,
+    cwd=str(Path(__file__).resolve().parents[1]),
+)
 pump(400)
 check(r.returncode == 0, f"--apply exits 0 ({r.stderr.strip()} {r.stdout.strip()})")
 s = fresh()

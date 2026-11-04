@@ -25,6 +25,7 @@ Protocol (ported from OpenRGB, GPL-2.0-or-later, Controllers/RazerController/):
     key-name generator (base key blocks + regional overlay + per-device edit opcodes), both ported as data
     into razer_devices.py by tools/gen_razer_table.py; the layout algorithm is ported below.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,14 +33,41 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
-from rgbdeck.models import (Device, DeviceError, Mode, Zone, NO_LED, MODE_COLORS_MODE_SPECIFIC, MODE_COLORS_NONE,
-                            MODE_COLORS_PER_LED, MODE_COLORS_RANDOM, MODE_FLAG_HAS_BRIGHTNESS,
-                            MODE_FLAG_HAS_DIRECTION_LR, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR, MODE_FLAG_HAS_PER_LED_COLOR,
-                            MODE_FLAG_HAS_RANDOM_COLOR, MODE_FLAG_HAS_SPEED, rgb_to_u32, u32_to_rgb)
+from rgbdeck.models import (
+    Device,
+    DeviceError,
+    Mode,
+    Zone,
+    NO_LED,
+    MODE_COLORS_MODE_SPECIFIC,
+    MODE_COLORS_NONE,
+    MODE_COLORS_PER_LED,
+    MODE_COLORS_RANDOM,
+    MODE_FLAG_HAS_BRIGHTNESS,
+    MODE_FLAG_HAS_DIRECTION_LR,
+    MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
+    MODE_FLAG_HAS_PER_LED_COLOR,
+    MODE_FLAG_HAS_RANDOM_COLOR,
+    MODE_FLAG_HAS_SPEED,
+    rgb_to_u32,
+    u32_to_rgb,
+)
 from rgbdeck.hw.hidraw import HidDevice, HidInfo, enumerate_hid
-from rgbdeck.hw.razer_devices import (BRIGHTNESS_100_PIDS, DEVICES, KEEPALIVE_PIDS, KLM_BASE, KLM_REGIONAL, LAYOUTS,
-                                      LED_ID_ZERO_PIDS, NO_BREATHING_PIDS, PIDS, REPORT_INDEX_07_PIDS,
-                                      SOFTWARE_MODE_PIDS, VID, WAVE_PIDS)
+from rgbdeck.hw.razer_devices import (
+    BRIGHTNESS_100_PIDS,
+    DEVICES,
+    KEEPALIVE_PIDS,
+    KLM_BASE,
+    KLM_REGIONAL,
+    LAYOUTS,
+    LED_ID_ZERO_PIDS,
+    NO_BREATHING_PIDS,
+    PIDS,
+    REPORT_INDEX_07_PIDS,
+    SOFTWARE_MODE_PIDS,
+    VID,
+    WAVE_PIDS,
+)
 
 log = logging.getLogger("rgbdeck.razer")
 
@@ -47,8 +75,8 @@ USB_IDS: List[Tuple[int, int]] = [(VID, pid) for pid in DEVICES]
 
 # razer_report is 90 bytes; hidraw wants the report id in front -> 91 bytes on the ioctl
 PKT = 91
-ARG = 9                     # offset of arguments[0]
-MIN_GAP = 0.001             # minimum spacing between two feature reports
+ARG = 9  # offset of arguments[0]
+MIN_GAP = 0.001  # minimum spacing between two feature reports
 
 # RazerController.h enums
 DEVICE_MODE_HARDWARE, DEVICE_MODE_SOFTWARE = 0x00, 0x03
@@ -57,9 +85,25 @@ CMD_GET_KEYBOARD_INFO, CMD_GET_WIRELESS_CONNECTIONS = 0x86, 0xBF
 STORAGE_NO_SAVE = 0x00
 LED_ZERO, LED_SCROLL_WHEEL, LED_LOGO, LED_BACKLIGHT = 0x00, 0x01, 0x04, 0x05
 MATRIX_NONE, MATRIX_STANDARD, MATRIX_EXTENDED, MATRIX_LINEAR, MATRIX_EXTENDED_ARGB, MATRIX_CUSTOM = range(6)
-LAYOUT_TYPE_ANSI, LAYOUT_TYPE_ISO, LAYOUT_TYPE_JIS, LAYOUT_TYPE_QWERTZ, LAYOUT_TYPE_AZERTY = 0x01, 0x02, 0x04, 0x08, 0x10
-EFF_OFF, EFF_STATIC, EFF_BREATHING, EFF_SPECTRUM, EFF_WAVE, EFF_REACTIVE, EFF_RIPPLE, EFF_STARLIGHT, EFF_CUSTOM, EFF_FIRE \
-    = range(10)
+LAYOUT_TYPE_ANSI, LAYOUT_TYPE_ISO, LAYOUT_TYPE_JIS, LAYOUT_TYPE_QWERTZ, LAYOUT_TYPE_AZERTY = (
+    0x01,
+    0x02,
+    0x04,
+    0x08,
+    0x10,
+)
+(
+    EFF_OFF,
+    EFF_STATIC,
+    EFF_BREATHING,
+    EFF_SPECTRUM,
+    EFF_WAVE,
+    EFF_REACTIVE,
+    EFF_RIPPLE,
+    EFF_STARLIGHT,
+    EFF_CUSTOM,
+    EFF_FIRE,
+) = range(10)
 DURATION_SHORT, DURATION_MEDIUM, DURATION_LONG = 1, 2, 3
 STATUS_NEW, STATUS_BUSY, STATUS_SUCCESS = 0x00, 0x01, 0x02
 
@@ -70,13 +114,26 @@ M_DIRECT, M_OFF, M_STATIC, M_BREATHING, M_SPECTRUM, M_WAVE, M_REACTIVE, M_STARLI
 # GetKeyboardLayoutType / GetKeyboardLayoutString]
 KLM_ANSI, KLM_ISO, KLM_QWERTZ, KLM_AZERTY = 1, 2, 3, 4
 KEYBOARD_LAYOUTS: Dict[int, Tuple[int, str]] = {
-    1: (KLM_ANSI, "US (ANSI)"), 2: (KLM_ISO, "Greek (ISO)"), 3: (KLM_QWERTZ, "German (QWERTZ)"),
-    4: (KLM_AZERTY, "French (ISO)"), 5: (KLM_ANSI, "Russian (ANSI)"), 6: (KLM_ISO, "UK (ISO)"),
-    7: (KLM_ISO, "Nordic (ISO)"), 8: (KLM_ANSI, "Chinese Traditional (ANSI)"), 9: (KLM_ISO, "Korean (ISO)"),
-    10: (KLM_ANSI, "Turkish (ANSI)"), 11: (KLM_ANSI, "Thai (ANSI)"), 12: (KLM_ANSI, "Japanese (JIS)"),
-    13: (KLM_ISO, "Portugese (Brazil) (ISO)"), 14: (KLM_ISO, "Spanish (Latin america) (ISO)"),
-    15: (KLM_ISO, "Swiss (ISO)"), 16: (KLM_ISO, "Spanish (Europe) (ISO)"), 17: (KLM_ISO, "Italian (ISO)"),
-    18: (KLM_ISO, "Portugese (Portugal) (ISO)"), 19: (KLM_ISO, "Hebrew (ISO)"), 20: (KLM_ANSI, "Arabic (ANSI)"),
+    1: (KLM_ANSI, "US (ANSI)"),
+    2: (KLM_ISO, "Greek (ISO)"),
+    3: (KLM_QWERTZ, "German (QWERTZ)"),
+    4: (KLM_AZERTY, "French (ISO)"),
+    5: (KLM_ANSI, "Russian (ANSI)"),
+    6: (KLM_ISO, "UK (ISO)"),
+    7: (KLM_ISO, "Nordic (ISO)"),
+    8: (KLM_ANSI, "Chinese Traditional (ANSI)"),
+    9: (KLM_ISO, "Korean (ISO)"),
+    10: (KLM_ANSI, "Turkish (ANSI)"),
+    11: (KLM_ANSI, "Thai (ANSI)"),
+    12: (KLM_ANSI, "Japanese (JIS)"),
+    13: (KLM_ISO, "Portugese (Brazil) (ISO)"),
+    14: (KLM_ISO, "Spanish (Latin america) (ISO)"),
+    15: (KLM_ISO, "Swiss (ISO)"),
+    16: (KLM_ISO, "Spanish (Europe) (ISO)"),
+    17: (KLM_ISO, "Italian (ISO)"),
+    18: (KLM_ISO, "Portugese (Portugal) (ISO)"),
+    19: (KLM_ISO, "Hebrew (ISO)"),
+    20: (KLM_ANSI, "Arabic (ANSI)"),
 }
 VARIANTS = {0x00: "Black", 0x80: "Quartz", 0x82: "Mercury"}
 
@@ -96,8 +153,15 @@ DEFAULT_COLOR = rgb_to_u32(0, 255, 0)
 # ---------------------------------------------------------------------------------------------------------------------
 # KeyboardLayoutManager port (OpenRGB KeyboardLayoutManager/KeyboardLayoutManager.cpp)
 # ---------------------------------------------------------------------------------------------------------------------
-OP_INSERT_SHIFT_RIGHT, OP_SWAP_ONLY, OP_REMOVE_SHIFT_LEFT, OP_INS_SHFT_ADJACENT, OP_INSERT_ROW, OP_REMOVE_ROW, \
-    OP_ADD_ALT_NAME = range(7)
+(
+    OP_INSERT_SHIFT_RIGHT,
+    OP_SWAP_ONLY,
+    OP_REMOVE_SHIFT_LEFT,
+    OP_INS_SHFT_ADJACENT,
+    OP_INSERT_ROW,
+    OP_REMOVE_ROW,
+    OP_ADD_ALT_NAME,
+) = range(7)
 SIZE_EMPTY, SIZE_SIXTY = 0, 1
 ZONE_MAIN, ZONE_FN_ROW, ZONE_EXTRA, ZONE_NUMPAD = 1, 2, 4, 8
 
@@ -119,7 +183,12 @@ class KeyboardLayout:
         self.rows = self.cols = 0
         if size == SIZE_EMPTY:
             return
-        for bit, block in ((ZONE_MAIN, "main"), (ZONE_FN_ROW, "fn_row"), (ZONE_EXTRA, "extras"), (ZONE_NUMPAD, "numpad")):
+        for bit, block in (
+            (ZONE_MAIN, "main"),
+            (ZONE_FN_ROW, "fn_row"),
+            (ZONE_EXTRA, "extras"),
+            (ZONE_NUMPAD, "numpad"),
+        ):
             if size & bit:
                 self.insert_keys(KLM_BASE[block])
         if layout in KLM_REGIONAL:
@@ -127,7 +196,7 @@ class KeyboardLayout:
         if regional and layout in regional:
             for e in regional[layout]:
                 self.swap_key(_Key(e[0], e[1], e[2], e[3]))
-        if size == SIZE_SIXTY:                              # drop the empty function row, keep Escape
+        if size == SIZE_SIXTY:  # drop the empty function row, keep Escape
             self.remove_row(0)
             esc = KLM_BASE["fn_row"][0]
             self.swap_key(_Key(esc[0], esc[1], esc[2], esc[3]))
@@ -181,7 +250,7 @@ class KeyboardLayout:
         if idx == len(km):
             km.append(ins)
             update_row = False
-        elif ins.name:                                      # an unused key only shifts the row
+        elif ins.name:  # an unused key only shifts the row
             km.insert(idx, ins)
             idx += 1
         if update_row:
@@ -267,8 +336,15 @@ def razer_crc(report: bytes) -> int:
 
 
 class RazerDevice:
-    def __init__(self, hid: HidDevice, pid: int, path: str, entry: Optional[dict] = None,
-                 wait_for_response: bool = False, name: Optional[str] = None):
+    def __init__(
+        self,
+        hid: HidDevice,
+        pid: int,
+        path: str,
+        entry: Optional[dict] = None,
+        wait_for_response: bool = False,
+        name: Optional[str] = None,
+    ):
         self.hid = hid
         self.pid = pid
         self.path = path
@@ -279,12 +355,12 @@ class RazerDevice:
         self.matrix_type = self.entry["matrix_type"]
         self.rows, self.cols = self.entry["rows"], self.entry["cols"]
         self.max_brightness = 100 if pid in BRIGHTNESS_100_PIDS else 255
-        self.wait_for_response = wait_for_response          # device reached through a wireless receiver
-        self.effects: Optional[Set[int]] = None             # firmware effect list, None = not available
+        self.wait_for_response = wait_for_response  # device reached through a wireless receiver
+        self.effects: Optional[Set[int]] = None  # firmware effect list, None = not available
         self._last_send = 0.0
-        self._led_pos: List[int] = []                       # device-matrix cell (row*cols+col) of each LED
+        self._led_pos: List[int] = []  # device-matrix cell (row*cols+col) of each LED
         if pid in KEEPALIVE_PIDS:
-            self.keepalive = self._keepalive                # picked up by the backend's keepalive timer
+            self.keepalive = self._keepalive  # picked up by the backend's keepalive timer
         try:
             if pid in SOFTWARE_MODE_PIDS:
                 self._set_device_mode(DEVICE_MODE_SOFTWARE)
@@ -366,7 +442,7 @@ class RazerDevice:
 
     def _get_serial(self) -> str:
         resp = self._get(self._report(0x00, CMD_GET_SERIAL, 0x16))
-        return "".join(chr(b) if 30 <= b <= 126 else " " for b in resp[ARG:ARG + 22]).strip()
+        return "".join(chr(b) if 30 <= b <= 126 else " " for b in resp[ARG : ARG + 22]).strip()
 
     def _get_device_mode(self) -> int:
         return self._get(self._report(0x00, CMD_GET_DEVICE_MODE, 0x02))[ARG]
@@ -453,30 +529,81 @@ class RazerDevice:
         if self._can_direct():
             add("Direct", M_DIRECT, MODE_FLAG_HAS_PER_LED_COLOR | B, color_mode=MODE_COLORS_PER_LED)
         add("Off", M_OFF, 0, color_mode=MODE_COLORS_NONE)
-        add("Static", M_STATIC, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | B, colors_min=1, colors_max=1,
-            color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[DEFAULT_COLOR])
+        add(
+            "Static",
+            M_STATIC,
+            MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | B,
+            colors_min=1,
+            colors_max=1,
+            color_mode=MODE_COLORS_MODE_SPECIFIC,
+            colors=[DEFAULT_COLOR],
+        )
         if self._supports(EFF_BREATHING) or self.pid not in NO_BREATHING_PIDS:
-            add("Breathing", M_BREATHING, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_RANDOM_COLOR | B,
-                colors_min=1, colors_max=2, color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[DEFAULT_COLOR])
+            add(
+                "Breathing",
+                M_BREATHING,
+                MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_RANDOM_COLOR | B,
+                colors_min=1,
+                colors_max=2,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors=[DEFAULT_COLOR],
+            )
         add("Spectrum Cycle", M_SPECTRUM, B, color_mode=MODE_COLORS_NONE)
         if self._supports(EFF_WAVE) or self.pid in WAVE_PIDS:
             add("Wave", M_WAVE, MODE_FLAG_HAS_DIRECTION_LR | B, direction=1, color_mode=MODE_COLORS_NONE)
         if self._supports(EFF_REACTIVE) and self._has_input():
-            add("Reactive", M_REACTIVE, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | B,
-                colors_min=1, colors_max=1, color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[DEFAULT_COLOR],
-                speed_min=DURATION_LONG, speed_max=DURATION_SHORT, speed=DURATION_MEDIUM)
+            add(
+                "Reactive",
+                M_REACTIVE,
+                MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | B,
+                colors_min=1,
+                colors_max=1,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors=[DEFAULT_COLOR],
+                speed_min=DURATION_LONG,
+                speed_max=DURATION_SHORT,
+                speed=DURATION_MEDIUM,
+            )
         if self._supports(EFF_STARLIGHT):
-            add("Starlight", M_STARLIGHT,
+            add(
+                "Starlight",
+                M_STARLIGHT,
                 MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_RANDOM_COLOR | MODE_FLAG_HAS_SPEED | B,
-                colors_min=1, colors_max=2, color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[DEFAULT_COLOR],
-                speed_min=DURATION_LONG, speed_max=DURATION_SHORT, speed=DURATION_MEDIUM)
+                colors_min=1,
+                colors_max=2,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors=[DEFAULT_COLOR],
+                speed_min=DURATION_LONG,
+                speed_max=DURATION_SHORT,
+                speed=DURATION_MEDIUM,
+            )
         if self._supports(EFF_RIPPLE) and self._has_input():
-            add("Ripple", M_RIPPLE, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | B, colors_min=1, colors_max=1,
-                color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[DEFAULT_COLOR])
+            add(
+                "Ripple",
+                M_RIPPLE,
+                MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | B,
+                colors_min=1,
+                colors_max=1,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors=[DEFAULT_COLOR],
+            )
         if self._supports(EFF_FIRE):
             add("Fire", M_FIRE, B, color_mode=MODE_COLORS_NONE)
-        return Device(0, self.entry["type"], name, "Razer", description + " (direct hidraw, ported from OpenRGB)",
-                      version, serial, "HID: " + self.path, 0, modes, zones, led_names, [0] * len(led_names))
+        return Device(
+            0,
+            self.entry["type"],
+            name,
+            "Razer",
+            description + " (direct hidraw, ported from OpenRGB)",
+            version,
+            serial,
+            "HID: " + self.path,
+            0,
+            modes,
+            zones,
+            led_names,
+            [0] * len(led_names),
+        )
 
     def _build_zones(self, layout_type: int) -> Tuple[List[Zone], List[str]]:
         """RGBController_Razer::SetupZones.  The device's custom-frame buffer is rows x cols cells and
@@ -544,22 +671,22 @@ class RazerDevice:
         if self.matrix_type == MATRIX_STANDARD:
             r = self._report(0x03, 0x0B, n + 4)
             r[ARG], r[ARG + 1], r[ARG + 2], r[ARG + 3] = 0xFF, row, start, stop
-            r[ARG + 4:ARG + 4 + n] = rgb[:n]
+            r[ARG + 4 : ARG + 4 + n] = rgb[:n]
             self._send(r)
         elif self.matrix_type == MATRIX_EXTENDED:
             r = self._report(0x0F, 0x03, n + 5)
             r[ARG + 2], r[ARG + 3], r[ARG + 4] = row, start, stop
-            r[ARG + 5:ARG + 5 + n] = rgb[:n]
+            r[ARG + 5 : ARG + 5 + n] = rgb[:n]
             self._send(r)
         elif self.matrix_type == MATRIX_LINEAR:
             r = self._report(0x03, 0x0C, 0x32)
             r[ARG], r[ARG + 1] = start, stop
-            r[ARG + 2:ARG + 2 + n] = rgb[:n]
+            r[ARG + 2 : ARG + 2 + n] = rgb[:n]
             self._send(r)
         elif self.matrix_type == MATRIX_CUSTOM:
             if self.pid in CUSTOM_LEDS:
                 for i, led in enumerate(CUSTOM_LEDS[self.pid]):
-                    self._send(self._led_rgb_report(led, rgb[3 * i:3 * i + 3]))
+                    self._send(self._led_rgb_report(led, rgb[3 * i : 3 * i + 3]))
             elif self.pid == PID_ORBWEAVER:
                 # 5x5 hardware grid presented as 4x5: rows/cols shifted by one, row 3 has a hole at column 2
                 if row != 3:
@@ -572,7 +699,7 @@ class RazerDevice:
         n = (stop + 1 - start) * 3
         r = self._report(0x03, 0x0B, n + 4)
         r[ARG], r[ARG + 1], r[ARG + 2], r[ARG + 3] = 0xFF, row, start, stop
-        r[ARG + 4:ARG + 4 + n] = rgb[:n].ljust(n, b"\0")
+        r[ARG + 4 : ARG + 4 + n] = rgb[:n].ljust(n, b"\0")
         return r
 
     # ---- effect reports (razer_create_mode_* in RazerController.cpp) --------------------------------------------
@@ -580,19 +707,19 @@ class RazerDevice:
         """Extended matrix effect report 0x0F:0x02 [storage, led, effect, ...]."""
         r = self._report(0x0F, 0x02, data_size)
         r[ARG], r[ARG + 1], r[ARG + 2] = STORAGE_NO_SAVE, self.led_id, effect
-        r[ARG + 3:ARG + 3 + len(args)] = bytes(args)
+        r[ARG + 3 : ARG + 3 + len(args)] = bytes(args)
         return r
 
     def _std(self, data_size: int, *args: int) -> bytearray:
         """Standard matrix effect report 0x03:0x0A."""
         r = self._report(0x03, 0x0A, data_size)
-        r[ARG:ARG + len(args)] = bytes(args)
+        r[ARG : ARG + len(args)] = bytes(args)
         return r
 
     def _led_rgb_report(self, led: int, rgb: bytes) -> bytearray:
         r = self._report(0x03, 0x01, 0x05)
         r[ARG], r[ARG + 1] = STORAGE_NO_SAVE, led
-        r[ARG + 2:ARG + 5] = bytes(rgb[:3]).ljust(3, b"\0")
+        r[ARG + 2 : ARG + 5] = bytes(rgb[:3]).ljust(3, b"\0")
         return r
 
     def _led_effect_report(self, led: int, effect: int) -> bytearray:
@@ -604,7 +731,7 @@ class RazerDevice:
         """razer_create_mode_effect_extended_matrix_report: effect, flags (sub-mode/direction), rate, colour count."""
         r = self._ext(0x06 + 3 * len(colors), effect, flags, rate, len(colors))
         for i, (red, grn, blu) in enumerate(colors):
-            r[ARG + 6 + 3 * i:ARG + 9 + 3 * i] = bytes((red, grn, blu))
+            r[ARG + 6 + 3 * i : ARG + 9 + 3 * i] = bytes((red, grn, blu))
         return r
 
     def _device_mode_report(self, mode: int) -> bytearray:
@@ -616,8 +743,9 @@ class RazerDevice:
         self._send(self._device_mode_report(mode))
 
     def _is_standard(self) -> bool:
-        return self.matrix_type in (MATRIX_STANDARD, MATRIX_LINEAR) or \
-            (self.matrix_type == MATRIX_CUSTOM and self.pid == PID_ORBWEAVER)
+        return self.matrix_type in (MATRIX_STANDARD, MATRIX_LINEAR) or (
+            self.matrix_type == MATRIX_CUSTOM and self.pid == PID_ORBWEAVER
+        )
 
     def _is_extended(self) -> bool:
         return self.matrix_type in (MATRIX_EXTENDED, MATRIX_EXTENDED_ARGB)
@@ -749,21 +877,21 @@ def descriptor_usages(desc: bytes) -> Set[Tuple[int, int]]:
     while i < len(desc):
         b = desc[i]
         i += 1
-        if b == 0xFE:                                       # long item
+        if b == 0xFE:  # long item
             i += 2 + (desc[i] if i < len(desc) else 0)
             continue
         size = (0, 1, 2, 4)[b & 3]
-        val = int.from_bytes(desc[i:i + size], "little")
+        val = int.from_bytes(desc[i : i + size], "little")
         i += size
         tag = b & 0xFC
-        if tag == 0x04:                                     # Usage Page
+        if tag == 0x04:  # Usage Page
             page = val
-        elif tag == 0x08:                                   # Usage
+        elif tag == 0x08:  # Usage
             if size == 4:
                 page, usage = val >> 16, val & 0xFFFF
             else:
                 usage = val
-        elif tag == 0xA0 and val == 0x01:                   # Collection (Application)
+        elif tag == 0xA0 and val == 0x01:  # Collection (Application)
             pairs.add((page, usage))
     return pairs
 
@@ -800,16 +928,29 @@ def probe() -> List[RazerDevice]:
             log.exception("probe of %s (%s) crashed", info.path, entry["name"])
             continue
         found.append(drv)
-        log.info("%s on %s: %d LEDs, %s", drv.device.name, info.path, len(drv.device.led_names),
-                 ", ".join(m.name for m in drv.device.modes))
+        log.info(
+            "%s on %s: %d LEDs, %s",
+            drv.device.name,
+            info.path,
+            len(drv.device.led_names),
+            ", ".join(m.name for m in drv.device.modes),
+        )
         # wireless receivers relay commands carrying a paired device's transaction id to that device
         for ppid in drv.paired_pids():
             if ppid == info.pid or ppid not in DEVICES:
                 continue
             paired = DEVICES[ppid]
             try:
-                found.append(RazerDevice(HidDevice(info.path), ppid, info.path, paired, wait_for_response=True,
-                                         name=f"{paired['name']} ({entry['name']})"))
+                found.append(
+                    RazerDevice(
+                        HidDevice(info.path),
+                        ppid,
+                        info.path,
+                        paired,
+                        wait_for_response=True,
+                        name=f"{paired['name']} ({entry['name']})",
+                    )
+                )
             except DeviceError as e:
                 log.info("skipping paired %s via %s: %s", paired["name"], info.path, e)
             except Exception:  # noqa: BLE001

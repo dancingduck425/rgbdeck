@@ -1,4 +1,5 @@
 """Device model shared by the UI and the hardware drivers."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -57,23 +58,37 @@ class Mode:
     colors: List[int] = field(default_factory=list)
 
     @property
-    def has_speed(self): return bool(self.flags & MODE_FLAG_HAS_SPEED)
+    def has_speed(self):
+        return bool(self.flags & MODE_FLAG_HAS_SPEED)
+
     @property
-    def has_brightness(self): return bool(self.flags & MODE_FLAG_HAS_BRIGHTNESS)
+    def has_brightness(self):
+        return bool(self.flags & MODE_FLAG_HAS_BRIGHTNESS)
+
     @property
-    def has_per_led(self): return bool(self.flags & MODE_FLAG_HAS_PER_LED_COLOR)
+    def has_per_led(self):
+        return bool(self.flags & MODE_FLAG_HAS_PER_LED_COLOR)
+
     @property
-    def has_mode_colors(self): return bool(self.flags & MODE_FLAG_HAS_MODE_SPECIFIC_COLOR)
+    def has_mode_colors(self):
+        return bool(self.flags & MODE_FLAG_HAS_MODE_SPECIFIC_COLOR)
+
     @property
-    def has_random(self): return bool(self.flags & MODE_FLAG_HAS_RANDOM_COLOR)
+    def has_random(self):
+        return bool(self.flags & MODE_FLAG_HAS_RANDOM_COLOR)
+
     @property
-    def can_save(self): return bool(self.flags & MODE_FLAG_MANUAL_SAVE)
+    def can_save(self):
+        return bool(self.flags & MODE_FLAG_MANUAL_SAVE)
 
     def directions(self) -> List[int]:
         out = []
-        if self.flags & MODE_FLAG_HAS_DIRECTION_LR: out += [0, 1]
-        if self.flags & MODE_FLAG_HAS_DIRECTION_UD: out += [2, 3]
-        if self.flags & MODE_FLAG_HAS_DIRECTION_HV: out += [4, 5]
+        if self.flags & MODE_FLAG_HAS_DIRECTION_LR:
+            out += [0, 1]
+        if self.flags & MODE_FLAG_HAS_DIRECTION_UD:
+            out += [2, 3]
+        if self.flags & MODE_FLAG_HAS_DIRECTION_HV:
+            out += [4, 5]
         return out
 
 
@@ -92,7 +107,7 @@ class Zone:
 @dataclass
 class Device:
     index: int
-    type_name: str            # "Keyboard" | "Mouse" | "Motherboard" | ...
+    type_name: str  # "Keyboard" | "Mouse" | "Motherboard" | ...
     name: str
     vendor: str
     description: str
@@ -104,6 +119,7 @@ class Device:
     zones: List[Zone]
     led_names: List[str]
     colors: List[int]
+    experimental: bool = False  # driver ported from sources but not yet verified on real hardware
 
     @property
     def current_mode(self) -> Mode:

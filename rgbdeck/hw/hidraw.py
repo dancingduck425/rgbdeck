@@ -1,4 +1,5 @@
 """Small /dev/hidraw helper: enumeration by VID/PID, output reports, feature reports."""
+
 from __future__ import annotations
 
 import fcntl
@@ -33,11 +34,11 @@ def HIDIOCGFEATURE(n: int) -> int:
 
 @dataclass
 class HidInfo:
-    path: str          # /dev/hidrawN
+    path: str  # /dev/hidrawN
     vid: int
     pid: int
     name: str
-    interface: int     # USB interface number, -1 if unknown
+    interface: int  # USB interface number, -1 if unknown
     descriptor: bytes
 
 
@@ -81,8 +82,10 @@ class HidDevice:
         try:
             self.fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
         except OSError as e:
-            raise DeviceError(f"can't open {path}: {e.strerror}. Your user needs access to this device "
-                              f"(install the udev rule from the RGB Deck folder).") from e
+            raise DeviceError(
+                f"can't open {path}: {e.strerror}. Your user needs access to this device "
+                f"(install the udev rule from the RGB Deck folder)."
+            ) from e
 
     def close(self):
         if self.fd is not None:

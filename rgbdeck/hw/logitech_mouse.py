@@ -30,6 +30,7 @@ OpenRGB Controllers/LogitechController/:
   LogitechControllerDetect.cpp                   VID/PID table, HID++ interface selection (usage page 0xFF00 usage 2 /
                                                  0xFF43 usage 0x0202), receiver handling
 """
+
 from __future__ import annotations
 
 import logging
@@ -37,15 +38,42 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from rgbdeck.models import (Device, DeviceError, Mode, Zone, MODE_COLORS_MODE_SPECIFIC, MODE_COLORS_NONE,
-                            MODE_COLORS_PER_LED, MODE_FLAG_AUTOMATIC_SAVE, MODE_FLAG_HAS_BRIGHTNESS,
-                            MODE_FLAG_HAS_DIRECTION_HV, MODE_FLAG_HAS_DIRECTION_LR, MODE_FLAG_HAS_DIRECTION_UD,
-                            MODE_FLAG_HAS_MODE_SPECIFIC_COLOR, MODE_FLAG_HAS_PER_LED_COLOR, MODE_FLAG_HAS_SPEED,
-                            MODE_FLAG_MANUAL_SAVE, u32_to_rgb)
+from rgbdeck.models import (
+    Device,
+    DeviceError,
+    Mode,
+    Zone,
+    MODE_COLORS_MODE_SPECIFIC,
+    MODE_COLORS_NONE,
+    MODE_COLORS_PER_LED,
+    MODE_FLAG_AUTOMATIC_SAVE,
+    MODE_FLAG_HAS_BRIGHTNESS,
+    MODE_FLAG_HAS_DIRECTION_HV,
+    MODE_FLAG_HAS_DIRECTION_LR,
+    MODE_FLAG_HAS_DIRECTION_UD,
+    MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
+    MODE_FLAG_HAS_PER_LED_COLOR,
+    MODE_FLAG_HAS_SPEED,
+    MODE_FLAG_MANUAL_SAVE,
+    u32_to_rgb,
+)
 from rgbdeck.hw.hidraw import HidDevice, HidInfo, enumerate_hid
+
 # Shared HID++ 2.0 constants with the keyboard driver (same transport, same software id 7, same period mapping).
-from rgbdeck.hw.logitech_hidpp import (ERR_BUSY, PERIOD_MAX, PERIOD_MIN, REPORT_LONG, REPORT_SHORT, REPORT_VLONG,
-                                       RIPPLE_MAX, RIPPLE_MIN, SWID, VID_LOGITECH, WAVE_DIR_WIRE, _slider_to_period)
+from rgbdeck.hw.logitech_hidpp import (
+    ERR_BUSY,
+    PERIOD_MAX,
+    PERIOD_MIN,
+    REPORT_LONG,
+    REPORT_SHORT,
+    REPORT_VLONG,
+    RIPPLE_MAX,
+    RIPPLE_MIN,
+    SWID,
+    VID_LOGITECH,
+    WAVE_DIR_WIRE,
+    _slider_to_period,
+)
 
 log = logging.getLogger("rgbdeck.logitech_mouse")
 
@@ -97,14 +125,21 @@ USB_IDS: List[Tuple[int, int]] = [(VID_LOGITECH, pid) for pid in list(WIRED) + l
 # Wireless (virtual) pids the kernel's hid-logitech-dj driver gives the per-slot child nodes; names used when the
 # device is asleep and cannot say its own name (LogitechControllerDetect.cpp hidpp20_legacy_wireless_pids).
 WIRELESS_PID_NAMES: Dict[int, str] = {
-    0x4053: "Logitech G900", 0x405D: "Logitech G403 Lightspeed", 0x405F: "Logitech Powerplay Mat",
-    0x4067: "Logitech G903", 0x4070: "Logitech G703", 0x4079: "Logitech G Pro Wireless", 0x407F: "Logitech G502 Lightspeed",
-    0x4086: "Logitech G703 HERO", 0x4087: "Logitech G903 HERO", 0x4099: "Logitech G502 X PLUS",
+    0x4053: "Logitech G900",
+    0x405D: "Logitech G403 Lightspeed",
+    0x405F: "Logitech Powerplay Mat",
+    0x4067: "Logitech G903",
+    0x4070: "Logitech G703",
+    0x4079: "Logitech G Pro Wireless",
+    0x407F: "Logitech G502 Lightspeed",
+    0x4086: "Logitech G703 HERO",
+    0x4087: "Logitech G903 HERO",
+    0x4099: "Logitech G502 X PLUS",
 }
 
 # LogitechProtocolCommon.h enum LOGITECH_DEVICE_TYPE (0x0005 GetDeviceType)
 DEV_TYPE_NAMES: Dict[int, str] = {3: T_MOUSE, 5: T_MOUSE, 4: T_MOUSEMAT, 8: T_HEADSET, 14: "Speaker", 16: "Light"}
-SKIP_DEV_TYPES = {0, 2}                          # keyboard / numpad: rgbdeck.hw.logitech_hidpp owns those
+SKIP_DEV_TYPES = {0, 2}  # keyboard / numpad: rgbdeck.hw.logitech_hidpp owns those
 
 # HID++ 2.0 feature ids (LogitechHIDPP20Controller.h HIDPP20_FEAT_*)
 FEAT_FEATURE_SET = 0x0001
@@ -119,11 +154,23 @@ FEAT_ONBOARD_PROFILES = 0x8100
 FEAT_PROFILE_MANAGEMENT = 0x8101
 
 # 0x8070 functions (LogitechProtocolCommon.h enum LOGITECH_FP8070)
-FN_8070_INFO, FN_8070_ZONE_INFO, FN_8070_EFFECT_INFO, FN_8070_SET_EFFECT, FN_8070_SET_SW_CTL = 0x00, 0x10, 0x20, 0x30, 0x80
+FN_8070_INFO, FN_8070_ZONE_INFO, FN_8070_EFFECT_INFO, FN_8070_SET_EFFECT, FN_8070_SET_SW_CTL = (
+    0x00,
+    0x10,
+    0x20,
+    0x30,
+    0x80,
+)
 # 0x8071 functions (LogitechHIDPP20Controller.h FN_8071_*)
-FN_8071_GET_INFO, FN_8071_SET_EFFECT, FN_8071_SW_CONTROL, FN_8071_PWR_CONFIG, FN_8071_PWR_MODE = 0x00, 0x10, 0x50, 0x70, 0x80
-FN_8100_SET_ONBOARD_MODE = 0x10                  # LogitechHIDPP20Controller.h FN_8100_SET_ONBOARD_MODE
-FN_8101_GET_SET_MODE = 0x60                      # LogitechHIDPP20Controller.h FN_8101_GET_SET_MODE
+FN_8071_GET_INFO, FN_8071_SET_EFFECT, FN_8071_SW_CONTROL, FN_8071_PWR_CONFIG, FN_8071_PWR_MODE = (
+    0x00,
+    0x10,
+    0x50,
+    0x70,
+    0x80,
+)
+FN_8100_SET_ONBOARD_MODE = 0x10  # LogitechHIDPP20Controller.h FN_8100_SET_ONBOARD_MODE
+FN_8101_GET_SET_MODE = 0x60  # LogitechHIDPP20Controller.h FN_8101_GET_SET_MODE
 FN_0005_GET_COUNT, FN_0005_GET_NAME, FN_0005_GET_TYPE = 0x00, 0x10, 0x20
 FN_1004_GET_STATUS = 0x10
 FN_1000_GET_LEVEL_STATUS = 0x00
@@ -134,8 +181,8 @@ DEV_IDX_RECEIVER = 0xFF
 RAP_SET_REGISTER, RAP_GET_REGISTER, RAP_GET_LONG_REGISTER = 0x80, 0x81, 0x83
 REG_NOTIFICATIONS, REG_CONNECTION_STATE, REG_PAIRING_INFO = 0x00, 0x02, 0xB5
 NOTIF_DEVICE_CONNECTION = 0x41
-ERR_HIDPP10 = 0x8F                               # receiver error frame for a slot (sub id 0x8F)
-ERR_RESOURCE = 0x09                              # ERR_RESOURCE_ERROR: paired device not connected
+ERR_HIDPP10 = 0x8F  # receiver error frame for a slot (sub id 0x8F)
+ERR_RESOURCE = 0x09  # ERR_RESOURCE_ERROR: paired device not connected
 RECEIVER_SLOTS = range(1, 7)
 
 # Effect type ids (LogitechProtocolCommon.h LOGITECH_DEVICE_MODE + RGBController_LogitechHIDPP20.cpp switch)
@@ -145,8 +192,16 @@ EFF_CYCLE_SAT, EFF_WAVE_SAT, EFF_RIPPLE_SAT = 0x0015, 0x0016, 0x0017
 
 # RGBController_LogitechHIDPP20.cpp zone_location_name()
 ZONE_LOCATION_NAMES: Dict[int, str] = {
-    0x0001: "Primary", 0x0002: "Logo", 0x0003: "Left Side", 0x0004: "Right Side", 0x0005: "Combined",
-    0x0006: "Primary 1", 0x0007: "Primary 2", 0x0008: "Primary 3", 0x0009: "Primary 4", 0x000A: "Primary 5",
+    0x0001: "Primary",
+    0x0002: "Logo",
+    0x0003: "Left Side",
+    0x0004: "Right Side",
+    0x0005: "Combined",
+    0x0006: "Primary 1",
+    0x0007: "Primary 2",
+    0x0008: "Primary 3",
+    0x0009: "Primary 4",
+    0x000A: "Primary 5",
     0x000B: "Primary 6",
 }
 
@@ -161,7 +216,7 @@ class DeviceOffline(DeviceError):
 
 @dataclass
 class Effect:
-    index: int          # position in the cluster's effect list = what SetEffect wants in data[1]
+    index: int  # position in the cluster's effect list = what SetEffect wants in data[1]
     effect_id: int
     capabilities: int = 0
     default_period: int = 0
@@ -181,7 +236,9 @@ class Cluster:
 
 
 def _hidpp_error(code: int, dev_idx: int, feat_idx: int, fn: int) -> DeviceError:
-    return DeviceError(f"HID++ error 0x{code:02X} (device index 0x{dev_idx:02X}, feature idx 0x{feat_idx:02X}, fn 0x{fn:02X})")
+    return DeviceError(
+        f"HID++ error 0x{code:02X} (device index 0x{dev_idx:02X}, feature idx 0x{feat_idx:02X}, fn 0x{fn:02X})"
+    )
 
 
 class HidppLink:
@@ -196,7 +253,7 @@ class HidppLink:
         self.hid = hid
         self.path = hid.path
         self.wireless = wireless
-        self.min_interval = 0.008 if wireless else 0.0     # CONTRIBUTING: rate-limit anything over a wireless link
+        self.min_interval = 0.008 if wireless else 0.0  # CONTRIBUTING: rate-limit anything over a wireless link
         self._last_write = 0.0
         self.users = 0
 
@@ -208,8 +265,9 @@ class HidppLink:
         self.hid.write(pkt)
         self._last_write = time.monotonic()
 
-    def fap(self, dev_idx: int, feat_idx: int, fn: int, data: bytes = b"", timeout: float = 0.3,
-            attempts: int = 4) -> bytes:
+    def fap(
+        self, dev_idx: int, feat_idx: int, fn: int, data: bytes = b"", timeout: float = 0.3, attempts: int = 4
+    ) -> bytes:
         """Send one feature call and wait for its answer. Returns the 16 payload bytes.
 
         Frames for other device indexes (sibling slots, receiver notifications) and other requests are skipped.
@@ -234,7 +292,7 @@ class HidppLink:
                     continue
                 if buf[1] != dev_idx:
                     continue
-                if buf[2] == 0xFF and buf[3] == feat_idx and buf[4] == fn_sw:         # HID++ 2.0 error frame
+                if buf[2] == 0xFF and buf[3] == feat_idx and buf[4] == fn_sw:  # HID++ 2.0 error frame
                     if buf[5] == ERR_BUSY:
                         busy = True
                         break
@@ -250,8 +308,9 @@ class HidppLink:
                 time.sleep(0.03)
         raise DeviceError(f"device index 0x{dev_idx:02X} did not answer feature idx 0x{feat_idx:02X} fn 0x{fn:02X}")
 
-    def rap(self, sub_id: int, address: int, data: bytes = b"", data0: Optional[int] = None,
-            timeout: float = 0.3) -> Optional[bytes]:
+    def rap(
+        self, sub_id: int, address: int, data: bytes = b"", data0: Optional[int] = None, timeout: float = 0.3
+    ) -> Optional[bytes]:
         """HID++ 1.0 register access to the receiver (device index 0xFF). Returns the whole reply frame or None.
 
         LogitechProtocolCommon.cpp getWirelessDevice() / getWirelessDeviceName(): the answer echoes sub id and
@@ -293,10 +352,10 @@ def enumerate_receiver(link: HidppLink) -> List[Tuple[int, int, bool]]:
     r = link.rap(RAP_GET_REGISTER, REG_NOTIFICATIONS)
     if r is None:
         raise DeviceError("receiver did not answer the notification-register read")
-    if not (r[5] & 0x01):                                      # response.data[1] & 1 = wireless notifications flag
+    if not (r[5] & 0x01):  # response.data[1] & 1 = wireless notifications flag
         link.rap(RAP_SET_REGISTER, REG_NOTIFICATIONS, bytes([0x00, 0x01, 0x00]))
     r = link.rap(RAP_GET_REGISTER, REG_CONNECTION_STATE)
-    count = r[5] if r else 0                                   # response.data[1] = number of connected devices
+    count = r[5] if r else 0  # response.data[1] = number of connected devices
     if count == 0:
         return []
     link.write_raw(bytes([REPORT_SHORT, DEV_IDX_RECEIVER, RAP_SET_REGISTER, REG_CONNECTION_STATE, 0x02, 0x00, 0x00]))
@@ -309,7 +368,7 @@ def enumerate_receiver(link: HidppLink) -> List[Tuple[int, int, bool]]:
         buf = link.hid.read(64, min(0.3, remaining))
         if not buf or len(buf) < 7 or buf[0] != REPORT_SHORT:
             continue
-        if buf[1] == DEV_IDX_RECEIVER:                         # the receiver's own ack to the register write
+        if buf[1] == DEV_IDX_RECEIVER:  # the receiver's own ack to the register write
             continue
         if buf[2] == NOTIF_DEVICE_CONNECTION and buf[1] in RECEIVER_SLOTS:
             slots[buf[1]] = ((buf[6] << 8) | buf[5], not (buf[4] & 0x40))
@@ -329,7 +388,7 @@ def receiver_slot_name(link: HidppLink, idx: int) -> str:
     n = r[5]
     if n == 0 or n > 14:
         return ""
-    name = r[6:6 + n].rstrip(b"\0 ").decode("ascii", errors="replace")
+    name = r[6 : 6 + n].rstrip(b"\0 ").decode("ascii", errors="replace")
     return name if all(0x20 <= ord(c) <= 0x7E for c in name) else ""
 
 
@@ -350,15 +409,23 @@ def receiver_slot_serial(link: HidppLink, idx: int) -> str:
 class LogitechHidppDevice:
     """One HID++ 2.0 device with cluster lighting (0x8071 preferred, else 0x8070): a mouse, mat or headset."""
 
-    def __init__(self, link: HidppLink, dev_idx: int, usb_pid: int, fallback_name: str, fallback_type: str,
-                 location: str, serial: str = ""):
+    def __init__(
+        self,
+        link: HidppLink,
+        dev_idx: int,
+        usb_pid: int,
+        fallback_name: str,
+        fallback_type: str,
+        location: str,
+        serial: str = "",
+    ):
         self.link = link
         self.dev_idx = dev_idx
         self.pid = usb_pid
         self.wireless = dev_idx != DEV_IDX_WIRED
         self.feat: Dict[int, int] = {}
         self.clusters: List[Cluster] = []
-        self.mode_effect: Dict[int, int] = {}          # mode index -> effect id
+        self.mode_effect: Dict[int, int] = {}  # mode index -> effect id
         self.claimed = False
         self.upgrade_pending = False
         self.sent: List[int] = []
@@ -368,9 +435,17 @@ class LogitechHidppDevice:
             # Probe(): a device is there iff IRoot answers for FeatureSet (short budget, sleeping slots answer 0x8F)
             if not self._get_feature_index(FEAT_FEATURE_SET, timeout=0.3, attempts=2):
                 raise DeviceError("no HID++ 2.0 answer (not a HID++ device, or asleep)")
-            for fid in (FEAT_DEVICE_NAME, FEAT_PER_KEY_8080, FEAT_PER_KEY_8081, FEAT_RGB_EFFECTS,
-                        FEAT_COLOR_LED_EFFECTS, FEAT_ONBOARD_PROFILES, FEAT_PROFILE_MANAGEMENT,
-                        FEAT_UNIFIED_BATTERY, FEAT_BATTERY_STATUS):
+            for fid in (
+                FEAT_DEVICE_NAME,
+                FEAT_PER_KEY_8080,
+                FEAT_PER_KEY_8081,
+                FEAT_RGB_EFFECTS,
+                FEAT_COLOR_LED_EFFECTS,
+                FEAT_ONBOARD_PROFILES,
+                FEAT_PROFILE_MANAGEMENT,
+                FEAT_UNIFIED_BATTERY,
+                FEAT_BATTERY_STATUS,
+            ):
                 self.feat[fid] = self._get_feature_index(fid)
             if self.feat[FEAT_PER_KEY_8080]:
                 raise DeviceError("per-key keyboard (feature 0x8080): handled by rgbdeck.hw.logitech_hidpp")
@@ -390,14 +465,22 @@ class LogitechHidppDevice:
             if not self.clusters:
                 raise DeviceError(f"{name}: lighting feature reports no clusters")
             if self.feat[FEAT_PER_KEY_8081]:
-                log.info("%s also exposes per-LED lighting (0x8081), not implemented: using 0x%04X clusters only",
-                         name, self.page)
+                log.info(
+                    "%s also exposes per-LED lighting (0x8081), not implemented: using 0x%04X clusters only",
+                    name,
+                    self.page,
+                )
         except DeviceError:
             link.release()
             raise
         self.device = self._build_device(name, type_name, location, serial)
-        log.info("%s: %d cluster(s) on feature 0x%04X, effects %s", name, len(self.clusters), self.page,
-                 ["0x%04X" % e.effect_id for e in self.clusters[0].effects])
+        log.info(
+            "%s: %d cluster(s) on feature 0x%04X, effects %s",
+            name,
+            len(self.clusters),
+            self.page,
+            ["0x%04X" % e.effect_id for e in self.clusters[0].effects],
+        )
 
     # ---- transport helpers -----------------------------------------------------------------------
     def _fap(self, feat_idx: int, fn: int, data: bytes = b"", **kw) -> bytes:
@@ -413,7 +496,7 @@ class LogitechHidppDevice:
         """Feature 0x0005 DeviceNameType (LogitechHIDPP20Controller.cpp DiscoverDeviceName / DiscoverDeviceType)."""
         idx = self.feat.get(FEAT_DEVICE_NAME)
         if not idx:
-            return "", 3                                         # OpenRGB assumes a mouse without 0x0005
+            return "", 3  # OpenRGB assumes a mouse without 0x0005
         name, dev_type = "", 3
         try:
             n = self._fap(idx, FN_0005_GET_COUNT)[0]
@@ -434,18 +517,18 @@ class LogitechHidppDevice:
         """LogitechHIDPP20Controller.cpp DiscoverRGBEffects(): GetInfo -> per-cluster info -> per-effect info."""
         idx = self.rgb_idx
         if self.page == FEAT_RGB_EFFECTS:
-            info = self._fap(idx, FN_8071_GET_INFO, bytes([0xFF, 0xFF, 0x00]))      # 0x8071 GetInfo(0xFF,0xFF,0)
-            count = info[2]                                                           # numRgbZones
+            info = self._fap(idx, FN_8071_GET_INFO, bytes([0xFF, 0xFF, 0x00]))  # 0x8071 GetInfo(0xFF,0xFF,0)
+            count = info[2]  # numRgbZones
         else:
-            info = self._fap(idx, FN_8070_INFO)                                       # 0x8070 getInfo()
-            count = info[0]                                                           # zone count
+            info = self._fap(idx, FN_8070_INFO)  # 0x8070 getInfo()
+            count = info[0]  # zone count
         for i in range(min(count, 32)):
             try:
                 if self.page == FEAT_RGB_EFFECTS:
-                    r = self._fap(idx, FN_8071_GET_INFO, bytes([i, 0xFF]))            # GetRgbClusterInfo
+                    r = self._fap(idx, FN_8071_GET_INFO, bytes([i, 0xFF]))  # GetRgbClusterInfo
                     location, n = (r[2] << 8) | r[3], r[4]
                 else:
-                    r = self._fap(idx, FN_8070_ZONE_INFO, bytes([i, 0x00]))           # getZoneInfo
+                    r = self._fap(idx, FN_8070_ZONE_INFO, bytes([i, 0x00]))  # getZoneInfo
                     location, n = (r[1] << 8) | r[2], r[3]
             except DeviceOffline:
                 raise
@@ -456,7 +539,7 @@ class LogitechHidppDevice:
             eff_fn = FN_8071_GET_INFO if self.page == FEAT_RGB_EFFECTS else FN_8070_EFFECT_INFO
             for j in range(min(n, 32)):
                 try:
-                    e = self._fap(idx, eff_fn, bytes([i, j, 0x00, 0x00]))             # GetEffectInfo(cluster, effect)
+                    e = self._fap(idx, eff_fn, bytes([i, j, 0x00, 0x00]))  # GetEffectInfo(cluster, effect)
                 except DeviceOffline:
                     raise
                 except DeviceError as err:
@@ -483,8 +566,13 @@ class LogitechHidppDevice:
         def colored(flags: int) -> dict:
             if per_led:
                 return dict(flags=flags | MODE_FLAG_HAS_PER_LED_COLOR, color_mode=MODE_COLORS_PER_LED)
-            return dict(flags=flags | MODE_FLAG_HAS_MODE_SPECIFIC_COLOR, color_mode=MODE_COLORS_MODE_SPECIFIC,
-                        colors_min=1, colors_max=1, colors=[DEFAULT_COLOR])
+            return dict(
+                flags=flags | MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors_min=1,
+                colors_max=1,
+                colors=[DEFAULT_COLOR],
+            )
 
         speed = dict(speed_min=1, speed_max=100)
         bright = dict(brightness_min=1, brightness_max=100, brightness=100)
@@ -498,8 +586,15 @@ class LogitechHidppDevice:
                 c = colored(save_flag)
                 add("Static", eid, c.pop("flags"), **c)
             elif eid in (EFF_CYCLE, EFF_CYCLE_SAT):
-                add("Spectrum Cycle", eid, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save_flag, speed=80,
-                    color_mode=MODE_COLORS_NONE, **speed, **bright)
+                add(
+                    "Spectrum Cycle",
+                    eid,
+                    MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save_flag,
+                    speed=80,
+                    color_mode=MODE_COLORS_NONE,
+                    **speed,
+                    **bright,
+                )
             elif eid == EFF_BREATHING:
                 c = colored(MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save_flag)
                 add("Breathing", eid, c.pop("flags"), speed=70, **speed, **bright, **c)
@@ -507,29 +602,68 @@ class LogitechHidppDevice:
                 c = colored(MODE_FLAG_HAS_SPEED | save_flag)
                 add("Audio Visualizer", eid, c.pop("flags"), speed=80, **speed, **c)
             elif eid in (EFF_WAVE, EFF_WAVE_SAT):
-                add("Color Wave", eid, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | direction | save_flag,
-                    speed=80, direction=1, color_mode=MODE_COLORS_NONE, **speed, **bright)
+                add(
+                    "Color Wave",
+                    eid,
+                    MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | direction | save_flag,
+                    speed=80,
+                    direction=1,
+                    color_mode=MODE_COLORS_NONE,
+                    **speed,
+                    **bright,
+                )
             elif eid == EFF_RIPPLE:
-                add("Ripple", eid, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS
-                    | save_flag, speed=70, colors_min=1, colors_max=1, color_mode=MODE_COLORS_MODE_SPECIFIC,
-                    colors=[DEFAULT_COLOR], **speed, **bright)
+                add(
+                    "Ripple",
+                    eid,
+                    MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save_flag,
+                    speed=70,
+                    colors_min=1,
+                    colors_max=1,
+                    color_mode=MODE_COLORS_MODE_SPECIFIC,
+                    colors=[DEFAULT_COLOR],
+                    **speed,
+                    **bright,
+                )
             elif eid == EFF_RIPPLE_SAT:
-                add("Ripple", eid, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | save_flag, speed=70,
-                    colors_min=1, colors_max=1, color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[DEFAULT_COLOR], **speed)
+                add(
+                    "Ripple",
+                    eid,
+                    MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_SPEED | save_flag,
+                    speed=70,
+                    colors_min=1,
+                    colors_max=1,
+                    color_mode=MODE_COLORS_MODE_SPECIFIC,
+                    colors=[DEFAULT_COLOR],
+                    **speed,
+                )
             elif eid in (EFF_DECOMPOSITION, EFF_SIGNATURE1, EFF_SIGNATURE2):
-                label = {EFF_DECOMPOSITION: "Decomposition", EFF_SIGNATURE1: "Signature 1",
-                         EFF_SIGNATURE2: "Signature 2"}[eid]
-                add(label, eid, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save_flag, speed=80,
-                    color_mode=MODE_COLORS_NONE, **speed, **bright)
+                label = {
+                    EFF_DECOMPOSITION: "Decomposition",
+                    EFF_SIGNATURE1: "Signature 1",
+                    EFF_SIGNATURE2: "Signature 2",
+                }[eid]
+                add(
+                    label,
+                    eid,
+                    MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | save_flag,
+                    speed=80,
+                    color_mode=MODE_COLORS_NONE,
+                    **speed,
+                    **bright,
+                )
             elif eid != EFF_OFF:
                 log.info("%s: effect 0x%04X not mapped, ignored", name, eid)
-        zones = [Zone(i, ZONE_LOCATION_NAMES.get(c.location, f"Zone 0x{c.location:04X}"), 0, 1, 1, 1, None, i)
-                 for i, c in enumerate(self.clusters)]
+        zones = [
+            Zone(i, ZONE_LOCATION_NAMES.get(c.location, f"Zone 0x{c.location:04X}"), 0, 1, 1, 1, None, i)
+            for i, c in enumerate(self.clusters)
+        ]
         led_names = [z.name for z in zones]
         desc = f"Logitech HID++ 2.0 {type_name.lower()} (feature 0x{self.page:04X}, direct hidraw"
         desc += ", via receiver)" if self.wireless else ")"
-        return Device(0, type_name, name, "Logitech", desc, "", serial, location, 0, modes, zones, led_names,
-                      [0] * len(zones))
+        return Device(
+            0, type_name, name, "Logitech", desc, "", serial, location, 0, modes, zones, led_names, [0] * len(zones)
+        )
 
     # ---- software control claim / release ---------------------------------------------------------
     def _claim(self):
@@ -541,10 +675,10 @@ class LogitechHidppDevice:
         if self.claimed:
             return
         if self.page == FEAT_COLOR_LED_EFFECTS:
-            self._fap(self.rgb_idx, FN_8070_SET_SW_CTL, bytes([0x01, 0x01]))                     # [enabled, persist]
+            self._fap(self.rgb_idx, FN_8070_SET_SW_CTL, bytes([0x01, 0x01]))  # [enabled, persist]
         else:
-            self._fap(self.rgb_idx, FN_8071_SW_CONTROL, bytes([0x01, 0x03, 0x06]))               # [set, mode 3, flags 6]
-            self._fap(self.rgb_idx, FN_8071_PWR_MODE, bytes([0x01, 0x01]))                       # SetRGBPowerMode(1)
+            self._fap(self.rgb_idx, FN_8071_SW_CONTROL, bytes([0x01, 0x03, 0x06]))  # [set, mode 3, flags 6]
+            self._fap(self.rgb_idx, FN_8071_PWR_MODE, bytes([0x01, 0x01]))  # SetRGBPowerMode(1)
             self._fap(self.rgb_idx, FN_8071_PWR_CONFIG, _power_config(POWER_IDLE_S, POWER_SLEEP_S))
             self._set_host_mode(True)
             self.upgrade_pending = True
@@ -588,8 +722,17 @@ class LogitechHidppDevice:
             log.debug("release failed: %s", e)
 
     # ---- effect packet -----------------------------------------------------------------------------
-    def _set_effect(self, cluster_idx: int, eff_idx: int, eff_id: int, color: int, period: int, brightness: int,
-                    direction: int, persist: bool):
+    def _set_effect(
+        self,
+        cluster_idx: int,
+        eff_idx: int,
+        eff_id: int,
+        color: int,
+        period: int,
+        brightness: int,
+        direction: int,
+        persist: bool,
+    ):
         payload = effect_payload(cluster_idx, eff_idx, eff_id, color, period, brightness, direction, persist)
         fn = FN_8071_SET_EFFECT if self.page == FEAT_RGB_EFFECTS else FN_8070_SET_EFFECT
         self._fap(self.rgb_idx, fn, payload)
@@ -599,11 +742,11 @@ class LogitechHidppDevice:
         """Per-zone colors. Direct rides the Static/Fixed effect per cluster (RGBController_LogitechHIDPP20.cpp
         DeviceUpdateLEDs zone path); other per-LED modes (Static/Breathing on multi-cluster devices) re-issue the
         active effect with the cluster's color. Only clusters whose color changed are written."""
-        colors = list(colors)[:len(self.clusters)]
+        colors = list(colors)[: len(self.clusters)]
         colors += [0] * (len(self.clusters) - len(colors))
         mode = self.device.current_mode
         if mode.color_mode != MODE_COLORS_PER_LED:
-            self.device.colors = colors                  # an effect without per-zone colors is running: nothing to push
+            self.device.colors = colors  # an effect without per-zone colors is running: nothing to push
             return
         self._claim()
         eff_id = self.mode_effect.get(mode.index, EFF_STATIC)
@@ -616,8 +759,16 @@ class LogitechHidppDevice:
             fx = cluster.find(eff_id)
             if fx is None:
                 continue
-            self._set_effect(cluster.index, fx.index, eff_id, colors[i], period, brightness,
-                             WAVE_DIR_WIRE.get(mode.direction, 1), False)
+            self._set_effect(
+                cluster.index,
+                fx.index,
+                eff_id,
+                colors[i],
+                period,
+                brightness,
+                WAVE_DIR_WIRE.get(mode.direction, 1),
+                False,
+            )
         self.sent = list(colors)
         self.device.colors = list(colors)
         self._upgrade()
@@ -629,7 +780,7 @@ class LogitechHidppDevice:
         self.device.active_mode = mode.index
         self.sent = []
         self._claim()
-        if mode.index == 0:                            # Direct: push the zone buffer through Static
+        if mode.index == 0:  # Direct: push the zone buffer through Static
             self.set_colors(self.device.colors)
             return
         is_8070 = self.page == FEAT_COLOR_LED_EFFECTS
@@ -656,8 +807,16 @@ class LogitechHidppDevice:
                 color = mode.colors[0]
             else:
                 color = 0
-            self._set_effect(cluster.index, fx.index, eff_id, color, period, brightness,
-                             WAVE_DIR_WIRE.get(mode.direction, 1), persist)
+            self._set_effect(
+                cluster.index,
+                fx.index,
+                eff_id,
+                color,
+                period,
+                brightness,
+                WAVE_DIR_WIRE.get(mode.direction, 1),
+                persist,
+            )
         if mode.color_mode == MODE_COLORS_PER_LED:
             self.sent = list(self.device.colors)
         self._upgrade()
@@ -688,8 +847,9 @@ class LogitechHidppDevice:
 
 
 # ---- packet builders (module level so the unit test can check them byte for byte) -----------------------
-def effect_payload(cluster_idx: int, eff_idx: int, eff_id: int, color: int, period: int, brightness: int,
-                   direction: int, persist: bool) -> bytes:
+def effect_payload(
+    cluster_idx: int, eff_idx: int, eff_id: int, color: int, period: int, brightness: int, direction: int, persist: bool
+) -> bytes:
     """16-byte SetEffect payload, verbatim port of LogitechHIDPP20Controller.cpp SetZoneEffect():
     [cluster, effect index, 10 bytes of effect params at data[2..11], persist at data[12]]."""
     r, g, b = u32_to_rgb(color)
@@ -700,7 +860,7 @@ def effect_payload(cluster_idx: int, eff_idx: int, eff_id: int, color: int, peri
     if eff_id == EFF_STATIC:
         d[2:5] = (r, g, b)
         if r or g or b:
-            d[5] = 0x02                       # "fixed color" marker; all black stays 0 = off
+            d[5] = 0x02  # "fixed color" marker; all black stays 0 = off
     elif eff_id == EFF_BREATHING:
         d[2:5] = (r, g, b)
         d[5], d[6], d[8] = hi, lo, bright
@@ -728,7 +888,7 @@ def effect_payload(cluster_idx: int, eff_idx: int, eff_id: int, color: int, peri
     elif eff_id == EFF_RIPPLE_SAT:
         d[2:5] = (r, g, b)
         d[5], d[8], d[9] = 0xFF, hi, lo
-    else:                                     # unknown effect: best effort, color + period
+    else:  # unknown effect: best effort, color + period
         d[2:5] = (r, g, b)
         d[5], d[6] = hi, lo
     d[12] = 0x01 if persist else 0x00
@@ -786,13 +946,25 @@ def open_receiver(link: HidppLink, pid: int) -> List[LogitechHidppDevice]:
         codename = receiver_slot_name(link, idx)
         fallback = WIRELESS_PID_NAMES.get(wpid) or (f"Logitech {codename}" if codename else "Logitech wireless device")
         if not online:
-            log.info("%s slot %d (%s, wireless pid %04x) is asleep or off; skipped until the next rescan",
-                     link.path, idx, fallback, wpid)
+            log.info(
+                "%s slot %d (%s, wireless pid %04x) is asleep or off; skipped until the next rescan",
+                link.path,
+                idx,
+                fallback,
+                wpid,
+            )
             continue
         fallback_type = T_MOUSEMAT if pid == 0xC53A or wpid == 0x405F else T_MOUSE
         try:
-            dev = LogitechHidppDevice(link, idx, wpid, fallback, fallback_type,
-                                      f"HID: {link.path} (receiver slot {idx})", receiver_slot_serial(link, idx))
+            dev = LogitechHidppDevice(
+                link,
+                idx,
+                wpid,
+                fallback,
+                fallback_type,
+                f"HID: {link.path} (receiver slot {idx})",
+                receiver_slot_serial(link, idx),
+            )
         except DeviceOffline as e:
             log.info("%s slot %d (%s): %s", link.path, idx, fallback, e)
             continue

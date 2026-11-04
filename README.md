@@ -64,6 +64,22 @@ rgbdeck --verbose            # log to the terminal; log file is ~/.config/rgbdec
 Don't run another RGB control program (vendor software etc.) at the same time — two programs talking to
 the same keyboard confuse each other.
 
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| "Found devices but can't access them" | Install the udev rule once, then unplug/replug: `sudo cp rgbdeck/data/70-rgbdeck.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger` |
+| Device not listed | Only families in the table above are detected. Close any other program that talks to the device (vendor software, OpenRGB…) — two controllers confuse the hardware. Then **File → Rescan devices**. |
+| Glorious mouse ignores colors | Its lighting is stored per onboard profile (1–3) and most tools only write profile 1. RGB Deck writes all three; if it still ignores you, press the profile button once. While on its cable the mouse still shows your colors — a solid color after charging is just the profile it is on. |
+| Typing effects don't react | They read `/dev/input/event*`. logind grants that to the active session; otherwise add your user to the `input` group. The hint under the effect chips says which input devices are being listened to. |
+| Keyboard flickers / lags while dragging the wheel | Frames are capped per device (Logitech ≈ 20 fps). If another program is also writing to the keyboard, close it. |
+| Something else | `rgbdeck --verbose` prints to the terminal; the log is at `~/.config/rgbdeck/rgbdeck.log`. Open an issue with the log and your `lsusb` line. |
+
+## Keyboard shortcuts
+
+`1` / `2` / `3` whole-device / paint / select · `F` fill · `Ctrl+A` select all · `Ctrl+I` invert · `Esc` clear ·
+right-click a key to pick its color · `Ctrl+Q` quit.
+
 ## Tests
 
 `tests/` drives the real hardware offscreen (stop the GUI first):

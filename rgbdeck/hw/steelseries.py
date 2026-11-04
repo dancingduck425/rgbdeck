@@ -32,6 +32,7 @@ Supported (OpenRGB family -> class here):
 
 Color values are RGB Deck u32: r | g << 8 | b << 16.
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,10 +40,23 @@ import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from rgbdeck.hw.hidraw import HidDevice, HidInfo, enumerate_hid
-from rgbdeck.models import (MODE_COLORS_MODE_SPECIFIC, MODE_COLORS_NONE, MODE_COLORS_PER_LED,
-                            MODE_FLAG_HAS_BRIGHTNESS, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR, MODE_FLAG_HAS_PER_LED_COLOR,
-                            MODE_FLAG_HAS_SPEED, MODE_FLAG_MANUAL_SAVE, NO_LED, Device, DeviceError, Mode, Zone,
-                            rgb_to_u32, u32_to_rgb)
+from rgbdeck.models import (
+    MODE_COLORS_MODE_SPECIFIC,
+    MODE_COLORS_NONE,
+    MODE_COLORS_PER_LED,
+    MODE_FLAG_HAS_BRIGHTNESS,
+    MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
+    MODE_FLAG_HAS_PER_LED_COLOR,
+    MODE_FLAG_HAS_SPEED,
+    MODE_FLAG_MANUAL_SAVE,
+    NO_LED,
+    Device,
+    DeviceError,
+    Mode,
+    Zone,
+    rgb_to_u32,
+    u32_to_rgb,
+)
 
 log = logging.getLogger("rgbdeck.steelseries")
 
@@ -61,7 +75,7 @@ RIVAL_3_WIRELESS = 0x20
 
 # SteelSeriesMouseController.h effect values (Rival 3 / Aerox / Rival 5 family)
 MOUSE_EFFECT_SPECTRUM_CYCLE = 0x00
-MOUSE_EFFECT_BREATHING_MIN = 0x03      # value 0x03 - speed(0..2) -> 0x03/0x02/0x01 (min/mid/max)
+MOUSE_EFFECT_BREATHING_MIN = 0x03  # value 0x03 - speed(0..2) -> 0x03/0x02/0x01 (min/mid/max)
 MOUSE_EFFECT_DIRECT = 0x04
 MOUSE_EFFECT_RAINBOW_BREATHING = 0x05
 MOUSE_EFFECT_REACTIVE = 0x07
@@ -71,7 +85,7 @@ MOUSE_BRIGHTNESS_MAX = 0x64
 
 def _pad(data: Sequence[int], size: int) -> bytes:
     buf = bytearray(size)
-    buf[:len(data)] = bytes(data)
+    buf[: len(data)] = bytes(data)
     return bytes(buf)
 
 
@@ -97,10 +111,24 @@ class _SteelSeriesDriver:
         self.path = path
         self.device: Device  # set by subclasses
 
-    def _make_device(self, modes: List[Mode], zones: List[Zone], led_names: List[str],
-                     version: str = "", serial: str = "") -> Device:
-        return Device(0, self.type_name, self.name, "SteelSeries", self.description, version, serial,
-                      "HID: " + self.path, 0, modes, zones, list(led_names), [0] * len(led_names))
+    def _make_device(
+        self, modes: List[Mode], zones: List[Zone], led_names: List[str], version: str = "", serial: str = ""
+    ) -> Device:
+        return Device(
+            0,
+            self.type_name,
+            self.name,
+            "SteelSeries",
+            self.description,
+            version,
+            serial,
+            "HID: " + self.path,
+            0,
+            modes,
+            zones,
+            list(led_names),
+            [0] * len(led_names),
+        )
 
     def _read(self, size: int = 64, timeout: float = 0.25) -> Optional[bytes]:
         try:
@@ -122,6 +150,7 @@ class _SteelSeriesDriver:
 # Mice
 # =====================================================================================================
 
+
 class RivalMouse(_SteelSeriesDriver):
     """Rival 100/105/106/110, 300, 600, 650, 700/710 — SteelSeriesRivalController.cpp.
 
@@ -129,10 +158,22 @@ class RivalMouse(_SteelSeriesDriver):
     the Rival 600 (raw 7-byte write, report id 0x1C) and the Rival 700 (579-byte feature report)."""
 
     description = "SteelSeries Rival Device"
-    RIVAL_650_LEDS = [("Left 1", 0x12), ("Left 2", 0x14), ("Left 3", 0x16),
-                      ("Right 1", 0x13), ("Right 2", 0x15), ("Right 3", 0x17)]
-    RIVAL_600_LEDS = [("Left top", 0x02), ("Left mid", 0x04), ("Left bottom", 0x06),
-                      ("Right top", 0x03), ("Right mid", 0x05), ("Right bottom", 0x07)]
+    RIVAL_650_LEDS = [
+        ("Left 1", 0x12),
+        ("Left 2", 0x14),
+        ("Left 3", 0x16),
+        ("Right 1", 0x13),
+        ("Right 2", 0x15),
+        ("Right 3", 0x17),
+    ]
+    RIVAL_600_LEDS = [
+        ("Left top", 0x02),
+        ("Left mid", 0x04),
+        ("Left bottom", 0x06),
+        ("Right top", 0x03),
+        ("Right mid", 0x05),
+        ("Right bottom", 0x07),
+    ]
     EFFECT_DIRECT, EFFECT_PULSATE_MIN, EFFECT_PULSATE_MID, EFFECT_PULSATE_MAX = 0x01, 0x02, 0x03, 0x04
 
     def __init__(self, hid: HidDevice, pid: int, name: str, path: str, proto: int):
@@ -147,18 +188,31 @@ class RivalMouse(_SteelSeriesDriver):
             zones.append(Zone(1, "Scroll Wheel", ZONE_SINGLE, 1, 1, 1, None, 1))
         elif proto == RIVAL_650:
             leds = [("Logo", 0x11), ("Scroll Wheel", 0x10)] + self.RIVAL_650_LEDS
-            zones = [Zone(0, "Logo", ZONE_SINGLE, 1, 1, 1, None, 0), Zone(1, "Scroll Wheel", ZONE_SINGLE, 1, 1, 1, None, 1),
-                     Zone(2, "Mouse", ZONE_LINEAR, 6, 6, 6, None, 2)]
+            zones = [
+                Zone(0, "Logo", ZONE_SINGLE, 1, 1, 1, None, 0),
+                Zone(1, "Scroll Wheel", ZONE_SINGLE, 1, 1, 1, None, 1),
+                Zone(2, "Mouse", ZONE_LINEAR, 6, 6, 6, None, 2),
+            ]
         elif proto == RIVAL_600:
             leds = [("Logo", 0x01), ("Scroll Wheel", 0x00)] + self.RIVAL_600_LEDS
-            zones = [Zone(0, "Logo", ZONE_SINGLE, 1, 1, 1, None, 0), Zone(1, "Scroll Wheel", ZONE_SINGLE, 1, 1, 1, None, 1),
-                     Zone(2, "Mouse", ZONE_LINEAR, 6, 6, 6, None, 2)]
+            zones = [
+                Zone(0, "Logo", ZONE_SINGLE, 1, 1, 1, None, 0),
+                Zone(1, "Scroll Wheel", ZONE_SINGLE, 1, 1, 1, None, 1),
+                Zone(2, "Mouse", ZONE_LINEAR, 6, 6, 6, None, 2),
+            ]
         self.led_values = [v for _n, v in leds]
         modes = [
             Mode(0, "Direct", 0, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_MANUAL_SAVE, color_mode=MODE_COLORS_PER_LED),
-            Mode(1, "Pulsate", 1, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_MANUAL_SAVE,
-                 speed_min=self.EFFECT_PULSATE_MIN, speed_max=self.EFFECT_PULSATE_MAX, speed=self.EFFECT_PULSATE_MID,
-                 color_mode=MODE_COLORS_PER_LED),
+            Mode(
+                1,
+                "Pulsate",
+                1,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_MANUAL_SAVE,
+                speed_min=self.EFFECT_PULSATE_MIN,
+                speed_max=self.EFFECT_PULSATE_MAX,
+                speed=self.EFFECT_PULSATE_MID,
+                color_mode=MODE_COLORS_PER_LED,
+            ),
         ]
         self.device = self._make_device(modes, zones, [n for n, _v in leds], version)
 
@@ -253,7 +307,7 @@ class RivalMouse(_SteelSeriesDriver):
     def set_colors(self, colors: List[int]):
         for value, col in zip(self.led_values, colors):
             self._set_color(value, *u32_to_rgb(col))
-        self.device.colors[:len(colors)] = list(colors)[:len(self.led_values)]
+        self.device.colors[: len(colors)] = list(colors)[: len(self.led_values)]
 
     def set_mode(self, mode: Mode, save: bool = False):
         self.device.active_mode = mode.index
@@ -273,11 +327,21 @@ class _MouseControllerBase(_SteelSeriesDriver):
 
     def _rival3_modes(self, available: Sequence[int]) -> List[Mode]:
         table = {
-            MOUSE_EFFECT_DIRECT: ("Direct", MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS | MODE_FLAG_MANUAL_SAVE,
-                                  dict(brightness_min=0, brightness_max=MOUSE_BRIGHTNESS_MAX, brightness=MOUSE_BRIGHTNESS_MAX,
-                                       color_mode=MODE_COLORS_PER_LED)),
-            MOUSE_EFFECT_BREATHING_MIN: ("Breathing", MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE,
-                                         dict(speed_min=0, speed_max=2, speed=1, color_mode=MODE_COLORS_PER_LED)),
+            MOUSE_EFFECT_DIRECT: (
+                "Direct",
+                MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS | MODE_FLAG_MANUAL_SAVE,
+                dict(
+                    brightness_min=0,
+                    brightness_max=MOUSE_BRIGHTNESS_MAX,
+                    brightness=MOUSE_BRIGHTNESS_MAX,
+                    color_mode=MODE_COLORS_PER_LED,
+                ),
+            ),
+            MOUSE_EFFECT_BREATHING_MIN: (
+                "Breathing",
+                MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE,
+                dict(speed_min=0, speed_max=2, speed=1, color_mode=MODE_COLORS_PER_LED),
+            ),
             MOUSE_EFFECT_SPECTRUM_CYCLE: ("Spectrum Cycle", MODE_FLAG_MANUAL_SAVE, {}),
             MOUSE_EFFECT_RAINBOW_BREATHING: ("Rainbow Breathing", MODE_FLAG_MANUAL_SAVE, {}),
         }
@@ -302,8 +366,8 @@ class _MouseControllerBase(_SteelSeriesDriver):
         mode = self.device.current_mode
         for value, col in zip(self.led_values, colors):
             self._set_color(value, *u32_to_rgb(col), mode.brightness)
-        self.device.colors[:len(colors)] = list(colors)[:len(self.led_values)]
-        self._set_light_effect_all(mode.value - mode.speed)     # DeviceUpdateLEDs() ends with DeviceUpdateMode()
+        self.device.colors[: len(colors)] = list(colors)[: len(self.led_values)]
+        self._set_light_effect_all(mode.value - mode.speed)  # DeviceUpdateLEDs() ends with DeviceUpdateMode()
 
     def set_mode(self, mode: Mode, save: bool = False):
         self.device.active_mode = mode.index
@@ -319,14 +383,23 @@ class Rival3Mouse(_MouseControllerBase):
     """Rival 3 wired (0x1824 old firmware, 0x184C) — SteelSeriesRival3Controller.cpp, interface 3."""
 
     LEDS = [("Front", 0x01), ("Middle", 0x02), ("Rear", 0x03), ("Logo", 0x04)]
-    MODES = (MOUSE_EFFECT_DIRECT, MOUSE_EFFECT_BREATHING_MIN, MOUSE_EFFECT_SPECTRUM_CYCLE, MOUSE_EFFECT_RAINBOW_BREATHING)
+    MODES = (
+        MOUSE_EFFECT_DIRECT,
+        MOUSE_EFFECT_BREATHING_MIN,
+        MOUSE_EFFECT_SPECTRUM_CYCLE,
+        MOUSE_EFFECT_RAINBOW_BREATHING,
+    )
 
     def __init__(self, hid: HidDevice, pid: int, name: str, path: str):
         super().__init__(hid, pid, name, path)
         self.led_values = [v for _n, v in self.LEDS]
         version = self._firmware_version()
-        self.device = self._make_device(self._rival3_modes(self.MODES), _single_zones([n for n, _v in self.LEDS]),
-                                        [n for n, _v in self.LEDS], version)
+        self.device = self._make_device(
+            self._rival3_modes(self.MODES),
+            _single_zones([n for n, _v in self.LEDS]),
+            [n for n, _v in self.LEDS],
+            version,
+        )
 
     def _firmware_version(self) -> str:
         try:
@@ -359,10 +432,14 @@ class Aerox3Mouse(_MouseControllerBase):
         super().__init__(hid, pid, name, path)
         self.led_values = [v for _n, v in self.LEDS]
         self.current_brightness: Optional[int] = None
-        self.hid.send_feature(_pad([0x00, 0x2D], self.PKT))              # SendInit()
+        self.hid.send_feature(_pad([0x00, 0x2D], self.PKT))  # SendInit()
         version = self._firmware_version()
-        self.device = self._make_device(self._rival3_modes((MOUSE_EFFECT_DIRECT,)), _single_zones([n for n, _v in self.LEDS]),
-                                        [n for n, _v in self.LEDS], version)
+        self.device = self._make_device(
+            self._rival3_modes((MOUSE_EFFECT_DIRECT,)),
+            _single_zones([n for n, _v in self.LEDS]),
+            [n for n, _v in self.LEDS],
+            version,
+        )
 
     def _firmware_version(self) -> str:
         return _aerox_firmware_version(self, self.PKT)
@@ -392,10 +469,14 @@ class Aerox5Mouse(_MouseControllerBase):
         super().__init__(hid, pid, name, path)
         self.led_values = [v for _n, v in self.LEDS]
         self.current_brightness: Optional[int] = None
-        self.hid.send_feature(_pad([0x00, 0x2D], self.PKT))              # SendInit()
+        self.hid.send_feature(_pad([0x00, 0x2D], self.PKT))  # SendInit()
         version = _aerox_firmware_version(self, self.PKT)
-        self.device = self._make_device(self._rival3_modes((MOUSE_EFFECT_DIRECT,)), _single_zones([n for n, _v in self.LEDS]),
-                                        [n for n, _v in self.LEDS], version)
+        self.device = self._make_device(
+            self._rival3_modes((MOUSE_EFFECT_DIRECT,)),
+            _single_zones([n for n, _v in self.LEDS]),
+            [n for n, _v in self.LEDS],
+            version,
+        )
 
     def _set_color(self, zone_id: int, r: int, g: int, b: int, brightness: int):
         buf = bytearray(self.PKT)
@@ -407,7 +488,7 @@ class Aerox5Mouse(_MouseControllerBase):
         elif zone_id == 2:
             buf[0x02], off = 0x04, 0x09
         elif zone_id == 3:
-            buf[0x01], off = 0x26, 0x04                                   # reactive LED has its own command
+            buf[0x01], off = 0x26, 0x04  # reactive LED has its own command
         else:
             return
         buf[off], buf[off + 1], buf[off + 2] = r, g, b
@@ -446,8 +527,14 @@ class AeroxWirelessMouse(_MouseControllerBase):
 
     PKT = 64
     WIRELESS_FLAG = 0x40
-    WIRELESS = {AEROX_3_WIRELESS, AEROX_3_GEN2_WIRELESS, AEROX_5_WIRELESS, AEROX_5_DESTINY_WIRELESS,
-                AEROX_5_DIABLO_WIRELESS, AEROX_9_WIRELESS}
+    WIRELESS = {
+        AEROX_3_WIRELESS,
+        AEROX_3_GEN2_WIRELESS,
+        AEROX_5_WIRELESS,
+        AEROX_5_DESTINY_WIRELESS,
+        AEROX_5_DIABLO_WIRELESS,
+        AEROX_9_WIRELESS,
+    }
     AEROX_3_LEDS = [("Front", 0), ("Middle", 1), ("Rear", 2)]
     AEROX_9_LEDS = [("Front", 0), ("Middle", 1), ("Rear", 2), ("Reactive", 3)]
     RIVAL_3W_LEDS = [("Scroll Wheel", 1)]
@@ -463,10 +550,11 @@ class AeroxWirelessMouse(_MouseControllerBase):
         else:
             leds, modes = self.AEROX_3_LEDS, (MOUSE_EFFECT_DIRECT, MOUSE_EFFECT_RAINBOW_BREATHING)
         self.led_values = [v for _n, v in leds]
-        self.hid.send_feature(_pad([0x00, 0x2D], self.PKT))              # SendInit()
+        self.hid.send_feature(_pad([0x00, 0x2D], self.PKT))  # SendInit()
         version = _aerox_firmware_version(self, self.PKT)
-        self.device = self._make_device(self._rival3_modes(modes), _single_zones([n for n, _v in leds]),
-                                        [n for n, _v in leds], version)
+        self.device = self._make_device(
+            self._rival3_modes(modes), _single_zones([n for n, _v in leds]), [n for n, _v in leds], version
+        )
 
     @property
     def is_wireless(self) -> bool:
@@ -477,7 +565,7 @@ class AeroxWirelessMouse(_MouseControllerBase):
             buf[1] |= self.WIRELESS_FLAG
         self.hid.write(bytes(buf))
         if self.is_wireless:
-            self._read(self.PKT, 0.25)                                     # read-back required in wireless mode
+            self._read(self.PKT, 0.25)  # read-back required in wireless mode
 
     def _set_color(self, zone_id: int, r: int, g: int, b: int, brightness: int):
         buf = bytearray(self.PKT)
@@ -519,20 +607,52 @@ class Rival5Mouse(_SteelSeriesDriver):
 
     description = "SteelSeries Mouse Device"
     PKT = 64
-    LEDS = ["Scroll Wheel", "Body Left 1", "Body Right 1", "Body Left 2", "Body Right 2",
-            "Body Left 3", "Body Right 3", "Body Left 4", "Body Right 4", "Logo"]
+    LEDS = [
+        "Scroll Wheel",
+        "Body Left 1",
+        "Body Right 1",
+        "Body Left 2",
+        "Body Right 2",
+        "Body Left 3",
+        "Body Right 3",
+        "Body Left 4",
+        "Body Right 4",
+        "Logo",
+    ]
 
     def __init__(self, hid: HidDevice, pid: int, name: str, path: str):
         super().__init__(hid, pid, name, path)
         self.current_brightness = 0xFF
         modes = [
-            Mode(0, "Direct", MOUSE_EFFECT_DIRECT, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS,
-                 brightness_min=0, brightness_max=MOUSE_BRIGHTNESS_MAX, brightness=MOUSE_BRIGHTNESS_MAX,
-                 color_mode=MODE_COLORS_PER_LED),
-            Mode(1, "Reactive", MOUSE_EFFECT_REACTIVE, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR, colors_min=1, colors_max=1,
-                 color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[rgb_to_u32(255, 255, 255)]),
-            Mode(2, "Rainbow", MOUSE_EFFECT_RAINBOW, MODE_FLAG_HAS_BRIGHTNESS, brightness_min=0,
-                 brightness_max=MOUSE_BRIGHTNESS_MAX, brightness=MOUSE_BRIGHTNESS_MAX),
+            Mode(
+                0,
+                "Direct",
+                MOUSE_EFFECT_DIRECT,
+                MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS,
+                brightness_min=0,
+                brightness_max=MOUSE_BRIGHTNESS_MAX,
+                brightness=MOUSE_BRIGHTNESS_MAX,
+                color_mode=MODE_COLORS_PER_LED,
+            ),
+            Mode(
+                1,
+                "Reactive",
+                MOUSE_EFFECT_REACTIVE,
+                MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
+                colors_min=1,
+                colors_max=1,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors=[rgb_to_u32(255, 255, 255)],
+            ),
+            Mode(
+                2,
+                "Rainbow",
+                MOUSE_EFFECT_RAINBOW,
+                MODE_FLAG_HAS_BRIGHTNESS,
+                brightness_min=0,
+                brightness_max=MOUSE_BRIGHTNESS_MAX,
+                brightness=MOUSE_BRIGHTNESS_MAX,
+            ),
         ]
         n = len(self.LEDS)
         self.device = self._make_device(modes, [Zone(0, "Whole Mouse", ZONE_LINEAR, n, n, n, None, 0)], self.LEDS)
@@ -560,11 +680,11 @@ class Rival5Mouse(_SteelSeriesDriver):
         buf = bytearray(self.PKT)
         buf[1], buf[2], buf[3] = 0x21, 0xFF, 0x03
         for i, col in enumerate(colors[:10]):
-            buf[4 + i * 3:7 + i * 3] = bytes(u32_to_rgb(col))
+            buf[4 + i * 3 : 7 + i * 3] = bytes(u32_to_rgb(col))
         self.hid.send_feature(bytes(buf))
 
     def set_colors(self, colors: List[int]):
-        self.device.colors[:len(colors)] = list(colors)[:10]
+        self.device.colors[: len(colors)] = list(colors)[:10]
         self._set_brightness(self.device.current_mode.brightness & 0xFF)
         self._update_leds(self.device.colors)
 
@@ -576,7 +696,7 @@ class Rival5Mouse(_SteelSeriesDriver):
         elif mode.value == MOUSE_EFFECT_RAINBOW:
             self._feature([0x00, 0x22, 0xFF, 0x03])
         else:
-            self._feature([0x00, 0x26])                                   # leaving Reactive must disable it
+            self._feature([0x00, 0x26])  # leaving Reactive must disable it
             self.set_colors(self.device.colors)
         # Rival 5 has no save command in OpenRGB
 
@@ -588,17 +708,33 @@ class SenseiMouse(_SteelSeriesDriver):
 
     description = "SteelSeries Sensei Device"
     MODE_DIRECT, MODE_BREATHING, MODE_RAINBOW = 0, 1, 2
-    BREATHING_DUR = {2: (0x27, 0x10), 3: (0x13, 0x88), 4: (0x09, 0xC4)}    # 10 s / 5 s / 2.5 s cycle
-    RAINBOW_DUR = {5: (0x4E, 0x20), 6: (0x27, 0x10), 7: (0x13, 0x88)}      # 20 s / 10 s / 5 s cycle
+    BREATHING_DUR = {2: (0x27, 0x10), 3: (0x13, 0x88), 4: (0x09, 0xC4)}  # 10 s / 5 s / 2.5 s cycle
+    RAINBOW_DUR = {5: (0x4E, 0x20), 6: (0x27, 0x10), 7: (0x13, 0x88)}  # 20 s / 10 s / 5 s cycle
 
     def __init__(self, hid: HidDevice, pid: int, name: str, path: str):
         super().__init__(hid, pid, name, path)
         modes = [
             Mode(0, "Direct", self.MODE_DIRECT, MODE_FLAG_HAS_PER_LED_COLOR, color_mode=MODE_COLORS_PER_LED),
-            Mode(1, "Breathing", self.MODE_BREATHING, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_PER_LED_COLOR,
-                 speed_min=2, speed_max=4, speed=3, color_mode=MODE_COLORS_PER_LED),
-            Mode(2, "Rainbow", self.MODE_RAINBOW, MODE_FLAG_HAS_SPEED, speed_min=5, speed_max=7, speed=6,
-                 color_mode=MODE_COLORS_NONE),
+            Mode(
+                1,
+                "Breathing",
+                self.MODE_BREATHING,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_PER_LED_COLOR,
+                speed_min=2,
+                speed_max=4,
+                speed=3,
+                color_mode=MODE_COLORS_PER_LED,
+            ),
+            Mode(
+                2,
+                "Rainbow",
+                self.MODE_RAINBOW,
+                MODE_FLAG_HAS_SPEED,
+                speed_min=5,
+                speed_max=7,
+                speed=6,
+                color_mode=MODE_COLORS_NONE,
+            ),
         ]
         names = ["Logo", "Scroll Wheel"]
         self.device = self._make_device(modes, _single_zones(names), names)
@@ -609,8 +745,8 @@ class SenseiMouse(_SteelSeriesDriver):
     def _set_color(self, zone_id: int, r: int, g: int, b: int):
         buf = bytearray(65)
         buf[0x00], buf[0x02] = 0x5B, zone_id
-        buf[0x13] = 0x01                                                  # static color flag
-        buf[0x1B] = 0x01                                                  # number of colors
+        buf[0x13] = 0x01  # static color flag
+        buf[0x1B] = 0x01  # number of colors
         buf[0x1C:0x1F] = bytes((r, g, b))
         buf[0x1F:0x22] = bytes((r, g, b))
         self._send(buf)
@@ -630,7 +766,7 @@ class SenseiMouse(_SteelSeriesDriver):
             dur1, dur2 = self.RAINBOW_DUR.get(speed, (0x27, 0x10))
             buf[0x00], buf[0x02], buf[0x04], buf[0x03] = 0x5B, zone_id, dur1, dur2
             buf[0x1B] = 0x07
-            buf[0x1C], buf[0x1D], buf[0x1E] = 0xFF, g, b                  # OpenRGB overwrites red with 0xFF, keeps g/b
+            buf[0x1C], buf[0x1D], buf[0x1E] = 0xFF, g, b  # OpenRGB overwrites red with 0xFF, keeps g/b
             buf[0x1F] = 0xFF
             buf[0x22], buf[0x23], buf[0x24] = 0x14, 0xFF, 0xFF
             buf[0x26], buf[0x28], buf[0x2A] = 0x2B, 0xFF, 0x2B
@@ -649,7 +785,7 @@ class SenseiMouse(_SteelSeriesDriver):
             self._set_light_effect(zone, mode.value, mode.speed, r, g, b)
 
     def set_colors(self, colors: List[int]):
-        self.device.colors[:len(colors)] = list(colors)[:2]
+        self.device.colors[: len(colors)] = list(colors)[:2]
         for zone in range(2):
             self._update_zone(zone)
 
@@ -657,7 +793,7 @@ class SenseiMouse(_SteelSeriesDriver):
         self.device.active_mode = mode.index
         self.set_colors(self.device.colors)
         if save:
-            self._send(bytearray([0x59]))                                   # SteelSeriesSenseiController::Save (unused by OpenRGB UI)
+            self._send(bytearray([0x59]))  # SteelSeriesSenseiController::Save (unused by OpenRGB UI)
 
 
 # =====================================================================================================
@@ -666,18 +802,118 @@ class SenseiMouse(_SteelSeriesDriver):
 
 # SteelSeriesApexController.cpp `keys[]`: per-key ids (HID keyboard usages plus 0xF0 Fn / 0xFB media)
 APEX_KEYS: List[int] = [
-    0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
-    0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-    0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21,
-    0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
-    0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x32, 0x33, 0x34, 0x35, 0x36,
-    0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40,
-    0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A,
-    0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x64, 0xE0,
-    0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xF0, 0x31, 0x87,
-    0x88, 0x89, 0x8A, 0x8B, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
-    0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x61, 0x62,
-    0x63, 0xFB,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x08,
+    0x09,
+    0x0A,
+    0x0B,
+    0x0C,
+    0x0D,
+    0x0E,
+    0x0F,
+    0x10,
+    0x11,
+    0x12,
+    0x13,
+    0x14,
+    0x15,
+    0x16,
+    0x17,
+    0x18,
+    0x19,
+    0x1A,
+    0x1B,
+    0x1C,
+    0x1D,
+    0x1E,
+    0x1F,
+    0x20,
+    0x21,
+    0x22,
+    0x23,
+    0x24,
+    0x25,
+    0x26,
+    0x27,
+    0x28,
+    0x29,
+    0x2A,
+    0x2B,
+    0x2C,
+    0x2D,
+    0x2E,
+    0x2F,
+    0x30,
+    0x32,
+    0x33,
+    0x34,
+    0x35,
+    0x36,
+    0x37,
+    0x38,
+    0x39,
+    0x3A,
+    0x3B,
+    0x3C,
+    0x3D,
+    0x3E,
+    0x3F,
+    0x40,
+    0x41,
+    0x42,
+    0x43,
+    0x44,
+    0x45,
+    0x46,
+    0x47,
+    0x48,
+    0x49,
+    0x4A,
+    0x4B,
+    0x4C,
+    0x4D,
+    0x4E,
+    0x4F,
+    0x50,
+    0x51,
+    0x52,
+    0x64,
+    0xE0,
+    0xE1,
+    0xE2,
+    0xE3,
+    0xE4,
+    0xE5,
+    0xE6,
+    0xE7,
+    0xF0,
+    0x31,
+    0x87,
+    0x88,
+    0x89,
+    0x8A,
+    0x8B,
+    0x53,
+    0x54,
+    0x55,
+    0x56,
+    0x57,
+    0x58,
+    0x59,
+    0x5A,
+    0x5B,
+    0x5C,
+    0x5D,
+    0x5E,
+    0x5F,
+    0x60,
+    0x61,
+    0x62,
+    0x63,
+    0xFB,
 ]
 
 # SteelSeriesApexRegions.h `led_names[]`, same order as APEX_KEYS. OpenRGB spellings translated to the
@@ -685,16 +921,63 @@ APEX_KEYS: List[int] = [
 APEX_LED_NAMES: List[str] = (
     [f"Key: {c}" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
     + [f"Key: {d}" for d in "1234567890"]
-    + ["Key: Enter", "Key: Escape", "Key: Backspace", "Key: Tab", "Key: Space", "Key: -", "Key: =", "Key: [", "Key: ]",
-       "Key: # (ISO)", "Key: ;", "Key: '", "Key: `", "Key: ,", "Key: .", "Key: /", "Key: Caps Lock"]
+    + [
+        "Key: Enter",
+        "Key: Escape",
+        "Key: Backspace",
+        "Key: Tab",
+        "Key: Space",
+        "Key: -",
+        "Key: =",
+        "Key: [",
+        "Key: ]",
+        "Key: # (ISO)",
+        "Key: ;",
+        "Key: '",
+        "Key: `",
+        "Key: ,",
+        "Key: .",
+        "Key: /",
+        "Key: Caps Lock",
+    ]
     + [f"Key: F{i}" for i in range(1, 13)]
-    + ["Key: Print Screen", "Key: Scroll Lock", "Key: Pause/Break", "Key: Insert", "Key: Home", "Key: Page Up",
-       "Key: Delete", "Key: End", "Key: Page Down", "Key: Right Arrow", "Key: Left Arrow", "Key: Down Arrow",
-       "Key: Up Arrow", "Key: \\ (ISO)", "Key: Left Control", "Key: Left Shift", "Key: Left Alt", "Key: Left Windows",
-       "Key: Right Control", "Key: Right Shift", "Key: Right Alt", "Key: Right Windows", "Key: Right Fn",
-       "Key: \\ (ANSI)", "Key: Ro (JIS)", "Key: Katakana/Hiragana (JIS)", "Key: Yen (JIS)", "Key: Henkan (JIS)",
-       "Key: Muhenkan (JIS)", "Key: Num Lock", "Key: Number Pad /", "Key: Number Pad *", "Key: Number Pad -",
-       "Key: Number Pad +", "Key: Number Pad Enter"]
+    + [
+        "Key: Print Screen",
+        "Key: Scroll Lock",
+        "Key: Pause/Break",
+        "Key: Insert",
+        "Key: Home",
+        "Key: Page Up",
+        "Key: Delete",
+        "Key: End",
+        "Key: Page Down",
+        "Key: Right Arrow",
+        "Key: Left Arrow",
+        "Key: Down Arrow",
+        "Key: Up Arrow",
+        "Key: \\ (ISO)",
+        "Key: Left Control",
+        "Key: Left Shift",
+        "Key: Left Alt",
+        "Key: Left Windows",
+        "Key: Right Control",
+        "Key: Right Shift",
+        "Key: Right Alt",
+        "Key: Right Windows",
+        "Key: Right Fn",
+        "Key: \\ (ANSI)",
+        "Key: Ro (JIS)",
+        "Key: Katakana/Hiragana (JIS)",
+        "Key: Yen (JIS)",
+        "Key: Henkan (JIS)",
+        "Key: Muhenkan (JIS)",
+        "Key: Num Lock",
+        "Key: Number Pad /",
+        "Key: Number Pad *",
+        "Key: Number Pad -",
+        "Key: Number Pad +",
+        "Key: Number Pad Enter",
+    ]
     + [f"Key: Number Pad {i}" for i in range(1, 10)]
     + ["Key: Number Pad 0", "Key: Number Pad .", "Key: Media Play/Pause"]
 )
@@ -713,27 +996,114 @@ APEX_MATRIX_ANSI: List[List[int]] = [
 ]
 
 # region patches: (row, column, led index or NA) — SteelSeriesApexRegions.h
-APEX_JP_REGION = [(1, 13, 91), (1, 14, 38), (2, 14, 36), (3, 13, 45), (4, 12, 89), (4, 13, 84),
-                  (5, 3, 93), (5, 10, 92), (5, 11, 90), (5, 12, 85)]
+APEX_JP_REGION = [
+    (1, 13, 91),
+    (1, 14, 38),
+    (2, 14, 36),
+    (3, 13, 45),
+    (4, 12, 89),
+    (4, 13, 84),
+    (5, 3, 93),
+    (5, 10, 92),
+    (5, 11, 90),
+    (5, 12, 85),
+]
 APEX_ISO_REGION = [(2, 14, 36), (3, 13, 45), (4, 1, 78)]
-APEX_TKL_REGION = [(0, 15, NA), (0, 16, NA), (0, 17, 111), (1, 18, NA), (1, 19, NA), (1, 20, NA), (1, 21, NA),
-                   (2, 18, NA), (2, 19, NA), (2, 20, NA), (2, 21, NA), (3, 18, NA), (3, 19, NA), (3, 20, NA),
-                   (4, 18, NA), (4, 19, NA), (4, 20, NA), (4, 21, NA), (5, 18, NA), (5, 20, NA)]
-APEX_MINI_REGION = [(0, 0, NA), (0, 2, NA), (0, 3, NA), (0, 4, NA), (0, 5, NA), (0, 7, NA), (0, 8, NA), (0, 9, NA),
-                    (0, 10, NA), (0, 11, NA), (0, 12, NA), (0, 13, NA), (0, 14, NA), (0, 15, NA), (0, 16, NA),
-                    (0, 17, NA), (1, 0, 37), (1, 15, NA), (1, 16, NA), (1, 17, NA), (1, 18, NA), (1, 19, NA),
-                    (1, 20, NA), (1, 21, NA), (2, 15, NA), (2, 16, NA), (2, 17, NA), (2, 18, NA), (2, 19, NA),
-                    (2, 20, NA), (2, 21, NA), (3, 18, NA), (3, 19, NA), (3, 20, NA), (4, 16, NA), (4, 18, NA),
-                    (4, 19, NA), (4, 20, NA), (4, 21, NA), (5, 15, NA), (5, 16, NA), (5, 17, NA), (5, 18, NA),
-                    (5, 20, NA)]
+APEX_TKL_REGION = [
+    (0, 15, NA),
+    (0, 16, NA),
+    (0, 17, 111),
+    (1, 18, NA),
+    (1, 19, NA),
+    (1, 20, NA),
+    (1, 21, NA),
+    (2, 18, NA),
+    (2, 19, NA),
+    (2, 20, NA),
+    (2, 21, NA),
+    (3, 18, NA),
+    (3, 19, NA),
+    (3, 20, NA),
+    (4, 18, NA),
+    (4, 19, NA),
+    (4, 20, NA),
+    (4, 21, NA),
+    (5, 18, NA),
+    (5, 20, NA),
+]
+APEX_MINI_REGION = [
+    (0, 0, NA),
+    (0, 2, NA),
+    (0, 3, NA),
+    (0, 4, NA),
+    (0, 5, NA),
+    (0, 7, NA),
+    (0, 8, NA),
+    (0, 9, NA),
+    (0, 10, NA),
+    (0, 11, NA),
+    (0, 12, NA),
+    (0, 13, NA),
+    (0, 14, NA),
+    (0, 15, NA),
+    (0, 16, NA),
+    (0, 17, NA),
+    (1, 0, 37),
+    (1, 15, NA),
+    (1, 16, NA),
+    (1, 17, NA),
+    (1, 18, NA),
+    (1, 19, NA),
+    (1, 20, NA),
+    (1, 21, NA),
+    (2, 15, NA),
+    (2, 16, NA),
+    (2, 17, NA),
+    (2, 18, NA),
+    (2, 19, NA),
+    (2, 20, NA),
+    (2, 21, NA),
+    (3, 18, NA),
+    (3, 19, NA),
+    (3, 20, NA),
+    (4, 16, NA),
+    (4, 18, NA),
+    (4, 19, NA),
+    (4, 20, NA),
+    (4, 21, NA),
+    (5, 15, NA),
+    (5, 16, NA),
+    (5, 17, NA),
+    (5, 18, NA),
+    (5, 20, NA),
+]
 # keyname lookups (cosmetic relabels for regional keycaps). OpenRGB's JP/Nordic cap labels are kept
 # verbatim; the keyboard geometry only needs the scancode-derived base names, so these only affect
 # display. ISO Enter keeps the canonical "Enter" name.
-APEX_JP_KEYNAMES = {42: "Key: ^", 43: "Key: @", 44: "Key: [", 45: "Key: ]", 47: "Key: :", 48: "Key: E/J",
-                    84: "Key: Right Shift", 36: "Key: Enter"}
+APEX_JP_KEYNAMES = {
+    42: "Key: ^",
+    43: "Key: @",
+    44: "Key: [",
+    45: "Key: ]",
+    47: "Key: :",
+    48: "Key: E/J",
+    84: "Key: Right Shift",
+    36: "Key: Enter",
+}
 APEX_UK_KEYNAMES = {36: "Key: Enter"}
-APEX_NOR_KEYNAMES = {36: "Key: Enter", 41: "Key: + ?", 42: "Key: ´ `", 43: "Key: Å", 44: "Key: ¨ ^", 45: "Key: ' *",
-                     46: "Key: Ä Ø", 47: "Key: Ö Æ", 48: "Key: § ½", 51: "Key: - _", 78: "Key: < >"}
+APEX_NOR_KEYNAMES = {
+    36: "Key: Enter",
+    41: "Key: + ?",
+    42: "Key: ´ `",
+    43: "Key: Å",
+    44: "Key: ¨ ^",
+    45: "Key: ' *",
+    46: "Key: Ä Ø",
+    47: "Key: Ö Æ",
+    48: "Key: § ½",
+    51: "Key: - _",
+    78: "Key: < >",
+}
 
 _Patch = Tuple[list, list, dict]
 # SKU (first 5 chars of the serial) -> (base patch, region patch, keyname lookup). OpenRGB lists "64856"
@@ -843,13 +1213,23 @@ PID_APEX_PRO_TKL_2023, PID_APEX_PRO_TKL_2023_WL_1, PID_APEX_PRO_TKL_2023_WL_2 = 
 PID_APEX_PRO_TKL_GEN3, PID_APEX_PRO_TKL_GEN3_WL_1, PID_APEX_PRO_TKL_GEN3_WL_2 = 0x1642, 0x1644, 0x1646
 PID_APEX_M750, PID_APEX_OG, PID_APEX_350, PID_APEX_PRO3 = 0x0616, 0x1202, 0x1206, 0x1640
 
-APEX_PROTOCOL_MAP = {PID_APEX_9_TKL: APEX_GEN2, PID_APEX_9_MINI: APEX_GEN2, PID_APEX_PRO_TKL_2023: APEX_GEN2,
-                     PID_APEX_PRO_TKL_2023_WL_1: APEX_GEN3, PID_APEX_PRO_TKL_2023_WL_2: APEX_GEN3,
-                     PID_APEX_PRO_TKL_GEN3: APEX_GEN3, PID_APEX_PRO_TKL_GEN3_WL_1: APEX_GEN3,
-                     PID_APEX_PRO_TKL_GEN3_WL_2: APEX_GEN3}
+APEX_PROTOCOL_MAP = {
+    PID_APEX_9_TKL: APEX_GEN2,
+    PID_APEX_9_MINI: APEX_GEN2,
+    PID_APEX_PRO_TKL_2023: APEX_GEN2,
+    PID_APEX_PRO_TKL_2023_WL_1: APEX_GEN3,
+    PID_APEX_PRO_TKL_2023_WL_2: APEX_GEN3,
+    PID_APEX_PRO_TKL_GEN3: APEX_GEN3,
+    PID_APEX_PRO_TKL_GEN3_WL_1: APEX_GEN3,
+    PID_APEX_PRO_TKL_GEN3_WL_2: APEX_GEN3,
+}
 APEX_DIRECT_LENGTH_MAP = {PID_APEX_9_TKL: APEX_9_PACKET_LENGTH, PID_APEX_9_MINI: APEX_9_PACKET_LENGTH}
-APEX_WIRELESS_PIDS = {PID_APEX_PRO_TKL_GEN3_WL_1, PID_APEX_PRO_TKL_GEN3_WL_2,
-                      PID_APEX_PRO_TKL_2023_WL_1, PID_APEX_PRO_TKL_2023_WL_2}
+APEX_WIRELESS_PIDS = {
+    PID_APEX_PRO_TKL_GEN3_WL_1,
+    PID_APEX_PRO_TKL_GEN3_WL_2,
+    PID_APEX_PRO_TKL_2023_WL_1,
+    PID_APEX_PRO_TKL_2023_WL_2,
+}
 APEX_GEN3_REGION_SKUS = {0x1: "64740", 0x3: "64741", 0x4: "64743", 0x6: "64744", 0xA: "64742", 0xD: "64745"}
 
 
@@ -878,8 +1258,15 @@ class ApexKeyboard(_SteelSeriesDriver):
         onboard = Mode(1, "Onboard", APEX_MODE_ONBOARD, onboard_flags, color_mode=MODE_COLORS_NONE)
         if self.brightness_supported:
             onboard.flags |= MODE_FLAG_HAS_BRIGHTNESS
-            onboard.brightness_min, onboard.brightness_max, onboard.brightness = APEX_BRIGHTNESS_MIN, APEX_BRIGHTNESS_MAX, self.brightness
-        modes = [Mode(0, "Direct", APEX_MODE_DIRECT, MODE_FLAG_HAS_PER_LED_COLOR, color_mode=MODE_COLORS_PER_LED), onboard]
+            onboard.brightness_min, onboard.brightness_max, onboard.brightness = (
+                APEX_BRIGHTNESS_MIN,
+                APEX_BRIGHTNESS_MAX,
+                self.brightness,
+            )
+        modes = [
+            Mode(0, "Direct", APEX_MODE_DIRECT, MODE_FLAG_HAS_PER_LED_COLOR, color_mode=MODE_COLORS_PER_LED),
+            onboard,
+        ]
         names = apex_led_names_for_sku(sku)
         n = len(names)
         zones = [Zone(0, "Keyboard", ZONE_MATRIX, n, n, n, apex_matrix_for_sku(sku), 0)]
@@ -966,7 +1353,9 @@ class ApexKeyboard(_SteelSeriesDriver):
     def set_colors(self, colors: List[int]):
         n = min(len(APEX_KEYS), len(colors), (self.direct_len - 3) // 4)
         if self.quirk >= APEX_GEN2:
-            packet_id = APEX_2023_PACKET_ID_DIRECT_WIRELESS if self.pid in APEX_WIRELESS_PIDS else APEX_2023_PACKET_ID_DIRECT
+            packet_id = (
+                APEX_2023_PACKET_ID_DIRECT_WIRELESS if self.pid in APEX_WIRELESS_PIDS else APEX_2023_PACKET_ID_DIRECT
+            )
         else:
             packet_id = APEX_GEN1_PACKET_ID_DIRECT
         buf = bytearray(self.direct_len)
@@ -974,9 +1363,9 @@ class ApexKeyboard(_SteelSeriesDriver):
         buf[0x02] = n
         for i in range(n):
             r, g, b = u32_to_rgb(colors[i])
-            buf[3 + i * 4:7 + i * 4] = bytes((APEX_KEYS[i], r, g, b))
+            buf[3 + i * 4 : 7 + i * 4] = bytes((APEX_KEYS[i], r, g, b))
         self.hid.send_feature(bytes(buf))
-        self.device.colors[:len(colors)] = list(colors)[:len(APEX_KEYS)]
+        self.device.colors[: len(colors)] = list(colors)[: len(APEX_KEYS)]
 
     def set_mode(self, mode: Mode, save: bool = False):
         self.device.active_mode = mode.index
@@ -994,7 +1383,7 @@ class ApexKeyboard(_SteelSeriesDriver):
 
     def close(self):
         try:
-            self._send_deinitialization()                                 # destructor hands the LEDs back to the firmware
+            self._send_deinitialization()  # destructor hands the LEDs back to the firmware
         except DeviceError:
             pass
         self.hid.close()
@@ -1003,12 +1392,138 @@ class ApexKeyboard(_SteelSeriesDriver):
 # SteelSeriesApexMController.cpp keys_m[]: physical slot -> APEX_LED_NAMES index (0xFF = unpopulated slot)
 _M = 0xFF
 APEX_M750_SLOTS: List[int] = [
-    79, 82, 81, _M, 40, _M, _M, _M, _M, 85, 86, 87, 83, _M, _M, 75, 76, 74, _M, 104, _M, 105,
-    80, 25, 23, 2, 21, 1, 13, 12, 49, 50, 51, _M, 84, _M, _M, _M, 77, _M, 95, 96, 97, 94,
-    52, 0, 18, 3, 5, 6, 7, 9, 10, 11, 46, 47, _M, 36, _M, _M, _M, _M, 98, 99, 100, _M,
-    39, 16, 22, 4, 17, 19, 24, 20, 8, 14, 15, 43, 44, _M, 88, 71, 72, 73, 101, 102, 103, 93,
-    48, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 41, 42, _M, 38, 68, 69, 70, 89, 90, 91, 92,
-    37, 53, 54, 55, 56, _M, 57, 58, 59, 60, _M, 61, 62, 63, 64, 65, 66, 67, _M, _M, _M, _M,
+    79,
+    82,
+    81,
+    _M,
+    40,
+    _M,
+    _M,
+    _M,
+    _M,
+    85,
+    86,
+    87,
+    83,
+    _M,
+    _M,
+    75,
+    76,
+    74,
+    _M,
+    104,
+    _M,
+    105,
+    80,
+    25,
+    23,
+    2,
+    21,
+    1,
+    13,
+    12,
+    49,
+    50,
+    51,
+    _M,
+    84,
+    _M,
+    _M,
+    _M,
+    77,
+    _M,
+    95,
+    96,
+    97,
+    94,
+    52,
+    0,
+    18,
+    3,
+    5,
+    6,
+    7,
+    9,
+    10,
+    11,
+    46,
+    47,
+    _M,
+    36,
+    _M,
+    _M,
+    _M,
+    _M,
+    98,
+    99,
+    100,
+    _M,
+    39,
+    16,
+    22,
+    4,
+    17,
+    19,
+    24,
+    20,
+    8,
+    14,
+    15,
+    43,
+    44,
+    _M,
+    88,
+    71,
+    72,
+    73,
+    101,
+    102,
+    103,
+    93,
+    48,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    41,
+    42,
+    _M,
+    38,
+    68,
+    69,
+    70,
+    89,
+    90,
+    91,
+    92,
+    37,
+    53,
+    54,
+    55,
+    56,
+    _M,
+    57,
+    58,
+    59,
+    60,
+    _M,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    _M,
+    _M,
+    _M,
+    _M,
 ]
 assert len(APEX_M750_SLOTS) == 132
 APEX_M_PACKET = 513
@@ -1023,9 +1538,11 @@ class ApexMKeyboard(_SteelSeriesDriver):
     def __init__(self, hid: HidDevice, pid: int, name: str, path: str):
         super().__init__(hid, pid, name, path)
         self._enable_led_control()
-        modes = [Mode(0, "Direct", APEX_MODE_DIRECT, MODE_FLAG_HAS_PER_LED_COLOR, color_mode=MODE_COLORS_PER_LED),
-                 Mode(1, "Onboard", APEX_MODE_ONBOARD, 0, color_mode=MODE_COLORS_NONE)]
-        names = list(APEX_LED_NAMES)      # no SKU available over hidraw -> ANSI map
+        modes = [
+            Mode(0, "Direct", APEX_MODE_DIRECT, MODE_FLAG_HAS_PER_LED_COLOR, color_mode=MODE_COLORS_PER_LED),
+            Mode(1, "Onboard", APEX_MODE_ONBOARD, 0, color_mode=MODE_COLORS_NONE),
+        ]
+        names = list(APEX_LED_NAMES)  # no SKU available over hidraw -> ANSI map
         n = len(names)
         zones = [Zone(0, "Keyboard", ZONE_MATRIX, n, n, n, apex_matrix_for_sku(""), 0)]
         self.device = self._make_device(modes, zones, names)
@@ -1033,7 +1550,9 @@ class ApexMKeyboard(_SteelSeriesDriver):
     def _enable_led_control(self):
         self.hid.send_feature(_pad([0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x85], APEX_M_PACKET))
         self.hid.send_feature(_pad([0x00, 0x00, 0x00, 0x00, 0x03, 0x01, 0x00, 0xFF], APEX_M_PACKET))
-        self.hid.send_feature(_pad([0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x85, 0xFF], APEX_M_PACKET))   # buf[7] keeps 0xFF from packet 2
+        self.hid.send_feature(
+            _pad([0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x85, 0xFF], APEX_M_PACKET)
+        )  # buf[7] keeps 0xFF from packet 2
 
     def set_colors(self, colors: List[int]):
         buf = bytearray(APEX_M_PACKET)
@@ -1041,14 +1560,14 @@ class ApexMKeyboard(_SteelSeriesDriver):
         for i, slot in enumerate(APEX_M750_SLOTS):
             off = 9 + i * 3
             if slot == _M or slot >= len(colors):
-                buf[off:off + 3] = bytes((0xFF, 0x32, 0x00))
+                buf[off : off + 3] = bytes((0xFF, 0x32, 0x00))
             else:
-                buf[off:off + 3] = bytes(u32_to_rgb(colors[slot]))
+                buf[off : off + 3] = bytes(u32_to_rgb(colors[slot]))
         self.hid.send_feature(bytes(buf))
-        self.device.colors[:len(colors)] = list(colors)[:len(APEX_LED_NAMES)]
+        self.device.colors[: len(colors)] = list(colors)[: len(APEX_LED_NAMES)]
 
     def set_mode(self, mode: Mode, save: bool = False):
-        self.device.active_mode = mode.index                              # SetMode() is a no-op on the M750
+        self.device.active_mode = mode.index  # SetMode() is a no-op on the M750
         if mode.value == APEX_MODE_DIRECT:
             self.set_colors(self.device.colors)
 
@@ -1062,9 +1581,18 @@ class ApexTZoneKeyboard(_SteelSeriesDriver):
 
     def __init__(self, hid: HidDevice, pid: int, name: str, path: str):
         super().__init__(hid, pid, name, path)
-        modes = [Mode(0, "Direct", 0, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS | MODE_FLAG_MANUAL_SAVE,
-                      brightness_min=0, brightness_max=self.BRIGHTNESS_MAX, brightness=self.BRIGHTNESS_MAX,
-                      color_mode=MODE_COLORS_PER_LED)]
+        modes = [
+            Mode(
+                0,
+                "Direct",
+                0,
+                MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS | MODE_FLAG_MANUAL_SAVE,
+                brightness_min=0,
+                brightness_max=self.BRIGHTNESS_MAX,
+                brightness=self.BRIGHTNESS_MAX,
+                color_mode=MODE_COLORS_PER_LED,
+            )
+        ]
         n = self.LED_COUNT
         names = [f"LED {i}" for i in range(n)]
         self.device = self._make_device(modes, [Zone(0, "Keyboard", ZONE_LINEAR, n, n, n, None, 0)], names)
@@ -1074,10 +1602,10 @@ class ApexTZoneKeyboard(_SteelSeriesDriver):
         self.hid.write(_pad([0x00, 0x0A, 0x00, brightness], self.PKT))
         buf = bytearray(self.PKT)
         buf[0x01] = 0x0B
-        for i, col in enumerate(colors[:self.LED_COUNT]):
-            buf[3 + i * 3:6 + i * 3] = bytes(u32_to_rgb(col))
+        for i, col in enumerate(colors[: self.LED_COUNT]):
+            buf[3 + i * 3 : 6 + i * 3] = bytes(u32_to_rgb(col))
         self.hid.write(bytes(buf))
-        self.device.colors[:len(colors)] = list(colors)[:self.LED_COUNT]
+        self.device.colors[: len(colors)] = list(colors)[: self.LED_COUNT]
 
     def set_mode(self, mode: Mode, save: bool = False):
         self.device.active_mode = mode.index
@@ -1098,27 +1626,44 @@ class Apex8ZoneKeyboard(_SteelSeriesDriver):
     def __init__(self, hid: HidDevice, pid: int, name: str, path: str):
         super().__init__(hid, pid, name, path)
         self.current_brightness: Optional[int] = None
-        modes = [Mode(0, "Direct", self.MODE_DIRECT, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS,
-                      brightness_min=0, brightness_max=self.BRIGHTNESS_MAX, brightness=self.BRIGHTNESS_MAX,
-                      color_mode=MODE_COLORS_PER_LED),
-                 Mode(1, "Rainbow Wave", self.MODE_RAINBOW_WAVE, MODE_FLAG_HAS_BRIGHTNESS, brightness_min=0,
-                      brightness_max=self.BRIGHTNESS_MAX, brightness=self.BRIGHTNESS_MAX, color_mode=MODE_COLORS_NONE)]
+        modes = [
+            Mode(
+                0,
+                "Direct",
+                self.MODE_DIRECT,
+                MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS,
+                brightness_min=0,
+                brightness_max=self.BRIGHTNESS_MAX,
+                brightness=self.BRIGHTNESS_MAX,
+                color_mode=MODE_COLORS_PER_LED,
+            ),
+            Mode(
+                1,
+                "Rainbow Wave",
+                self.MODE_RAINBOW_WAVE,
+                MODE_FLAG_HAS_BRIGHTNESS,
+                brightness_min=0,
+                brightness_max=self.BRIGHTNESS_MAX,
+                brightness=self.BRIGHTNESS_MAX,
+                color_mode=MODE_COLORS_NONE,
+            ),
+        ]
         n = self.LED_COUNT
         names = [f"LED {i}" for i in range(n)]
         self.device = self._make_device(modes, [Zone(0, "Keyboard", ZONE_LINEAR, n, n, n, None, 0)], names)
 
     def _set_color(self, colors: Sequence[int], mode_value: int, brightness: int):
         buf = bytearray(self.PKT)
-        buf[0x01], buf[0x02] = 0x21 + mode_value, 0xFF                    # 0x21 = set LEDs, 0x22 = rainbow wave
-        for i, col in enumerate(colors[:self.LED_COUNT]):
-            buf[3 + i * 3:6 + i * 3] = bytes(u32_to_rgb(col))
+        buf[0x01], buf[0x02] = 0x21 + mode_value, 0xFF  # 0x21 = set LEDs, 0x22 = rainbow wave
+        for i, col in enumerate(colors[: self.LED_COUNT]):
+            buf[3 + i * 3 : 6 + i * 3] = bytes(u32_to_rgb(col))
         self.hid.write(bytes(buf))
         if self.current_brightness != brightness:
             self.hid.write(_pad([0x00, 0x23, brightness & 0xFF], self.PKT))
             self.current_brightness = brightness
 
     def set_colors(self, colors: List[int]):
-        self.device.colors[:len(colors)] = list(colors)[:self.LED_COUNT]
+        self.device.colors[: len(colors)] = list(colors)[: self.LED_COUNT]
         mode = self.device.current_mode
         self._set_color(self.device.colors, mode.value, mode.brightness)
 
@@ -1148,13 +1693,13 @@ class OldApexKeyboard(_SteelSeriesDriver):
         self.device = self._make_device(modes, zones, self.ZONES)
 
     def set_colors(self, colors: List[int]):
-        self.device.colors[:len(colors)] = list(colors)[:5]
+        self.device.colors[: len(colors)] = list(colors)[:5]
         buf = bytearray(32)
-        buf[0x00], buf[0x01] = 0x07, 0x00                                 # all zones
+        buf[0x00], buf[0x01] = 0x07, 0x00  # all zones
         alpha = self.device.current_mode.value
         for i in range(5):
             r, g, b = u32_to_rgb(self.device.colors[i])
-            buf[2 + i * 4:6 + i * 4] = bytes((r, g, b, alpha))
+            buf[2 + i * 4 : 6 + i * 4] = bytes((r, g, b, alpha))
         self.hid.write(_prefixed(buf, 32))
 
     def set_mode(self, mode: Mode, save: bool = False):
@@ -1165,6 +1710,7 @@ class OldApexKeyboard(_SteelSeriesDriver):
 # =====================================================================================================
 # Headsets
 # =====================================================================================================
+
 
 class SiberiaHeadset(_SteelSeriesDriver):
     """Siberia 350 (0x1229) — SteelSeriesSiberiaController.cpp, interface 3, 16-byte writes with report id 0x01."""
@@ -1180,7 +1726,7 @@ class SiberiaHeadset(_SteelSeriesDriver):
     def _send(self, cmd: int, payload: Sequence[int]):
         buf = bytearray(16)
         buf[0], buf[1], buf[2], buf[3] = 0x01, 0x00, cmd, len(payload)
-        buf[4:4 + len(payload)] = bytes(payload)
+        buf[4 : 4 + len(payload)] = bytes(payload)
         self.hid.write(bytes(buf))
 
     def set_colors(self, colors: List[int]):
@@ -1223,12 +1769,12 @@ class Arctis5Headset(_SteelSeriesDriver):
         self._w([0x8A, 0x42, 0x00, 0x20, 0x05])
 
     def set_colors(self, colors: List[int]):
-        self.device.colors[:len(colors)] = list(colors)[:2]
+        self.device.colors[: len(colors)] = list(colors)[:2]
         for zone in range(2):
             self._set_color(zone, self.device.colors[zone])
 
     def set_mode(self, mode: Mode, save: bool = False):
-        self.device.active_mode = mode.index                              # DeviceUpdateMode() is empty in OpenRGB
+        self.device.active_mode = mode.index  # DeviceUpdateMode() is empty in OpenRGB
 
 
 class ArctisNova3Headset(_SteelSeriesDriver):
@@ -1240,11 +1786,53 @@ class ArctisNova3Headset(_SteelSeriesDriver):
     description = "SteelSeries Arctis Nova 3 Headset Device"
     REPORT_SIZE, APPLY_SIZE, REPORT_ID = 521, 64, 0x06
     MODE_OFF, MODE_DIRECT, MODE_BREATHE, MODE_RAINBOW, MODE_ORANGE, MODE_BLUE = 0, 1, 2, 3, 4, 5
-    SPEED_BYTES = {1: (0x30, 0x75), 2: (0x2E, 0x68), 3: (0x2C, 0x5B), 4: (0x20, 0x4E), 5: (0x1E, 0x41),
-                   6: (0x1C, 0x34), 7: (0x1A, 0x27), 8: (0x0E, 0x1A), 9: (0x0C, 0x0D), 10: (0x94, 0x02)}
-    RAINBOW_STOPS = bytes([0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00,
-                           0x2B, 0x00, 0xFF, 0x00, 0x2B, 0x00, 0xFF, 0xFF, 0x2B, 0x00,
-                           0x00, 0xFF, 0x2B, 0xFF, 0x00, 0xFF, 0x2B, 0xFF, 0x00, 0x00, 0x26])
+    SPEED_BYTES = {
+        1: (0x30, 0x75),
+        2: (0x2E, 0x68),
+        3: (0x2C, 0x5B),
+        4: (0x20, 0x4E),
+        5: (0x1E, 0x41),
+        6: (0x1C, 0x34),
+        7: (0x1A, 0x27),
+        8: (0x0E, 0x1A),
+        9: (0x0C, 0x0D),
+        10: (0x94, 0x02),
+    }
+    RAINBOW_STOPS = bytes(
+        [
+            0xFF,
+            0x00,
+            0x00,
+            0xFF,
+            0x00,
+            0x00,
+            0x00,
+            0xFF,
+            0xFF,
+            0x00,
+            0x2B,
+            0x00,
+            0xFF,
+            0x00,
+            0x2B,
+            0x00,
+            0xFF,
+            0xFF,
+            0x2B,
+            0x00,
+            0x00,
+            0xFF,
+            0x2B,
+            0xFF,
+            0x00,
+            0xFF,
+            0x2B,
+            0xFF,
+            0x00,
+            0x00,
+            0x26,
+        ]
+    )
     ORANGE_STOPS = bytes([0xFF, 0xEA, 0x00, 0xFF, 0xEA, 0x00, 0x00, 0xFF, 0x4D, 0x00, 0x7F, 0xFF, 0xEA, 0x00, 0x7F])
     BLUE_STOPS = bytes([0x8C, 0x00, 0xFF, 0x8C, 0x00, 0xFF, 0x00, 0x3B, 0xD1, 0xFF, 0x7F, 0x8C, 0x00, 0xFF, 0x7F])
 
@@ -1252,13 +1840,47 @@ class ArctisNova3Headset(_SteelSeriesDriver):
         super().__init__(hid, pid, name, path)
         speed = dict(speed_min=1, speed_max=10)
         modes = [
-            Mode(0, "Direct", self.MODE_DIRECT, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_MANUAL_SAVE, color_mode=MODE_COLORS_PER_LED),
+            Mode(
+                0,
+                "Direct",
+                self.MODE_DIRECT,
+                MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_MANUAL_SAVE,
+                color_mode=MODE_COLORS_PER_LED,
+            ),
             Mode(1, "Off", self.MODE_OFF, 0, color_mode=MODE_COLORS_NONE),
-            Mode(2, "Breathe", self.MODE_BREATHE, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE,
-                 speed=9, color_mode=MODE_COLORS_PER_LED, **speed),
-            Mode(3, "Color Shift - Rainbow", self.MODE_RAINBOW, MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE, speed=6, **speed),
-            Mode(4, "Color Shift - Heat Orange", self.MODE_ORANGE, MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE, speed=6, **speed),
-            Mode(5, "Color Shift - Frost Blue", self.MODE_BLUE, MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE, speed=6, **speed),
+            Mode(
+                2,
+                "Breathe",
+                self.MODE_BREATHE,
+                MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE,
+                speed=9,
+                color_mode=MODE_COLORS_PER_LED,
+                **speed,
+            ),
+            Mode(
+                3,
+                "Color Shift - Rainbow",
+                self.MODE_RAINBOW,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE,
+                speed=6,
+                **speed,
+            ),
+            Mode(
+                4,
+                "Color Shift - Heat Orange",
+                self.MODE_ORANGE,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE,
+                speed=6,
+                **speed,
+            ),
+            Mode(
+                5,
+                "Color Shift - Frost Blue",
+                self.MODE_BLUE,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_MANUAL_SAVE,
+                speed=6,
+                **speed,
+            ),
         ]
         names = ["Right", "Left"]
         self.device = self._make_device(modes, [Zone(0, "Nova 3", ZONE_LINEAR, 2, 2, 2, None, 0)], names)
@@ -1304,17 +1926,17 @@ class ArctisNova3Headset(_SteelSeriesDriver):
                 buf[0x34] = 0x7F
             elif mode.value == self.MODE_RAINBOW:
                 buf[0x25] = 0x07
-                buf[0x26:0x26 + len(self.RAINBOW_STOPS)] = self.RAINBOW_STOPS
+                buf[0x26 : 0x26 + len(self.RAINBOW_STOPS)] = self.RAINBOW_STOPS
             elif mode.value == self.MODE_ORANGE:
                 buf[0x25] = 0x03
-                buf[0x26:0x26 + len(self.ORANGE_STOPS)] = self.ORANGE_STOPS
+                buf[0x26 : 0x26 + len(self.ORANGE_STOPS)] = self.ORANGE_STOPS
             elif mode.value == self.MODE_BLUE:
                 buf[0x25] = 0x03
-                buf[0x26:0x26 + len(self.BLUE_STOPS)] = self.BLUE_STOPS
+                buf[0x26 : 0x26 + len(self.BLUE_STOPS)] = self.BLUE_STOPS
         self._finish(zone_id, buf)
 
     def set_colors(self, colors: List[int]):
-        self.device.colors[:len(colors)] = list(colors)[:2]
+        self.device.colors[: len(colors)] = list(colors)[:2]
         for zone in range(2):
             self._update_led(zone)
 
@@ -1329,6 +1951,7 @@ class ArctisNova3Headset(_SteelSeriesDriver):
 # =====================================================================================================
 # Mousemats
 # =====================================================================================================
+
 
 class QckPrismMat(_SteelSeriesDriver):
     """QcK Prism Cloth (all sizes/editions) — SteelSeriesQCKMatController.cpp, interface 0.
@@ -1345,7 +1968,7 @@ class QckPrismMat(_SteelSeriesDriver):
         self.device = self._make_device(modes, [Zone(0, "Mousemat", ZONE_SINGLE, 2, 2, 2, None, 0)], names)
 
     def set_colors(self, colors: List[int]):
-        self.device.colors[:len(colors)] = list(colors)[:2]
+        self.device.colors[: len(colors)] = list(colors)[:2]
         buf = bytearray(525)
         buf[0x01], buf[0x03] = 0x0E, 0x02
         buf[0x08], buf[0x09], buf[0x0A], buf[0x0E] = 0xFF, 0x32, 0xC8, 0x01
@@ -1383,15 +2006,30 @@ DEVICES: Dict[int, Tuple[str, int, Optional[int], Factory]] = {
     0x1838: ("SteelSeries Aerox 3 Wireless", 3, VENDOR_PAGE, _aerox_wl(AEROX_3_WIRELESS)),
     0x183A: ("SteelSeries Aerox 3 Wireless Wired", 3, VENDOR_PAGE, _aerox_wl(AEROX_3_WIRELESS_WIRED)),
     0x1878: ("SteelSeries Aerox 3 CS2 Dragon Lore Edition Wireless", 3, VENDOR_PAGE, _aerox_wl(AEROX_3_WIRELESS)),
-    0x187A: ("SteelSeries Aerox 3 CS2 Dragon Lore Edition Wireless Wired", 3, VENDOR_PAGE, _aerox_wl(AEROX_3_WIRELESS_WIRED)),
+    0x187A: (
+        "SteelSeries Aerox 3 CS2 Dragon Lore Edition Wireless Wired",
+        3,
+        VENDOR_PAGE,
+        _aerox_wl(AEROX_3_WIRELESS_WIRED),
+    ),
     0x1890: ("SteelSeries Aerox 3 Wireless Gen 2", 3, VENDOR_PAGE, _aerox_wl(AEROX_3_GEN2_WIRELESS)),
     0x1836: ("SteelSeries Aerox 3 Wired", 3, VENDOR_PAGE, Aerox3Mouse),
     0x1852: ("SteelSeries Aerox 5 Wireless", 3, VENDOR_PAGE, _aerox_wl(AEROX_5_WIRELESS)),
     0x1854: ("SteelSeries Aerox 5 Wireless Wired", 3, VENDOR_PAGE, _aerox_wl(AEROX_5_WIRELESS_WIRED)),
     0x185C: ("SteelSeries Aerox 5 Destiny 2 Edition Wireless", 3, VENDOR_PAGE, _aerox_wl(AEROX_5_DESTINY_WIRELESS)),
-    0x185E: ("SteelSeries Aerox 5 Destiny 2 Edition Wireless Wired", 3, VENDOR_PAGE, _aerox_wl(AEROX_5_DESTINY_WIRELESS_WIRED)),
+    0x185E: (
+        "SteelSeries Aerox 5 Destiny 2 Edition Wireless Wired",
+        3,
+        VENDOR_PAGE,
+        _aerox_wl(AEROX_5_DESTINY_WIRELESS_WIRED),
+    ),
     0x1860: ("SteelSeries Aerox 5 Diablo IV Edition Wireless", 3, VENDOR_PAGE, _aerox_wl(AEROX_5_DIABLO_WIRELESS)),
-    0x1862: ("SteelSeries Aerox 5 Diablo IV Edition Wireless Wired", 3, VENDOR_PAGE, _aerox_wl(AEROX_5_DIABLO_WIRELESS_WIRED)),
+    0x1862: (
+        "SteelSeries Aerox 5 Diablo IV Edition Wireless Wired",
+        3,
+        VENDOR_PAGE,
+        _aerox_wl(AEROX_5_DIABLO_WIRELESS_WIRED),
+    ),
     0x1850: ("SteelSeries Aerox 5 Wired", 3, VENDOR_PAGE, Aerox5Mouse),
     0x1858: ("SteelSeries Aerox 9 Wireless", 3, VENDOR_PAGE, _aerox_wl(AEROX_9_WIRELESS)),
     0x185A: ("SteelSeries Aerox 9 Wireless Wired", 3, VENDOR_PAGE, _aerox_wl(AEROX_9_WIRELESS_WIRED)),
@@ -1400,7 +2038,7 @@ DEVICES: Dict[int, Tuple[str, int, Optional[int], Factory]] = {
     0x1814: ("SteelSeries Rival 105", 0, None, _rival(RIVAL_100)),
     0x1816: ("SteelSeries Rival 106", 0, None, _rival(RIVAL_100)),
     0x1729: ("SteelSeries Rival 110", 0, None, _rival(RIVAL_100)),
-    0x1710: ("SteelSeries Rival 300", 0, None, _rival(RIVAL_300)),          # also "Black Ops Edition" (same PID)
+    0x1710: ("SteelSeries Rival 300", 0, None, _rival(RIVAL_300)),  # also "Black Ops Edition" (same PID)
     0x1714: ("Acer Predator Gaming Mouse (Rival 300)", 0, None, _rival(RIVAL_300)),
     0x1394: ("SteelSeries Rival 300 CS:GO Fade Edition", 0, None, _rival(RIVAL_300)),
     0x1716: ("SteelSeries Rival 300 CS:GO Fade Edition (stm32)", 0, None, _rival(RIVAL_300)),
@@ -1478,7 +2116,7 @@ def probe() -> List[_SteelSeriesDriver]:
     found: List[_SteelSeriesDriver] = []
     try:
         infos = enumerate_hid(VID)
-    except Exception as e:                                                # noqa: BLE001 - probe must never raise
+    except Exception as e:  # noqa: BLE001 - probe must never raise
         log.info("SteelSeries enumeration failed: %s", e)
         return found
     for info in infos:
@@ -1493,7 +2131,7 @@ def probe() -> List[_SteelSeriesDriver]:
             hid = HidDevice(info.path)
             found.append(factory(hid, info.pid, name, info.path))
             log.info("SteelSeries: %s on %s (interface %d)", name, info.path, info.interface)
-        except Exception as e:                                            # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             log.info("skipping %s (%s): %s", info.path, name, e)
             if hid is not None:
                 hid.close()

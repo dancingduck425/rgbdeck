@@ -47,6 +47,7 @@ QuadCast S caveat (from OpenRGB): the RGB interface has no interrupt IN endpoint
 and no /dev/hidraw node appears; OpenRGB falls back to hidapi-libusb. This driver can only pick it up when a hidraw
 node exists (e.g. via a quirk), otherwise probe() simply does not find it.
 """
+
 from __future__ import annotations
 
 import logging
@@ -56,10 +57,25 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from rgbdeck.hw.hidraw import HidDevice, HidInfo, enumerate_hid
-from rgbdeck.models import (NO_LED, Device, DeviceError, Mode, MODE_COLORS_MODE_SPECIFIC, MODE_COLORS_NONE,
-                            MODE_COLORS_PER_LED, MODE_FLAG_AUTOMATIC_SAVE, MODE_FLAG_HAS_BRIGHTNESS,
-                            MODE_FLAG_HAS_DIRECTION_LR, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR, MODE_FLAG_HAS_PER_LED_COLOR,
-                            MODE_FLAG_HAS_RANDOM_COLOR, MODE_FLAG_HAS_SPEED, MODE_FLAG_MANUAL_SAVE, Zone, u32_to_rgb)
+from rgbdeck.models import (
+    NO_LED,
+    Device,
+    DeviceError,
+    Mode,
+    MODE_COLORS_MODE_SPECIFIC,
+    MODE_COLORS_NONE,
+    MODE_COLORS_PER_LED,
+    MODE_FLAG_AUTOMATIC_SAVE,
+    MODE_FLAG_HAS_BRIGHTNESS,
+    MODE_FLAG_HAS_DIRECTION_LR,
+    MODE_FLAG_HAS_MODE_SPECIFIC_COLOR,
+    MODE_FLAG_HAS_PER_LED_COLOR,
+    MODE_FLAG_HAS_RANDOM_COLOR,
+    MODE_FLAG_HAS_SPEED,
+    MODE_FLAG_MANUAL_SAVE,
+    Zone,
+    u32_to_rgb,
+)
 
 log = logging.getLogger("rgbdeck.hyperx")
 
@@ -141,7 +157,7 @@ def _usb_parent(path: str) -> str:
     interfaces yields one driver."""
     try:
         real = os.path.realpath(f"/sys/class/hidraw/{os.path.basename(path)}/device")
-        iface_dir = os.path.basename(os.path.dirname(real))          # e.g. 1-3:1.2
+        iface_dir = os.path.basename(os.path.dirname(real))  # e.g. 1-3:1.2
         return iface_dir.split(":", 1)[0] or path
     except OSError:
         return path
@@ -153,8 +169,8 @@ def _usb_parent(path: str) -> str:
 class _HyperXDevice:
     """Owns the hidraw handle, remembers the last frame for keepalive(), builds the Device model."""
 
-    KEEPALIVE_INTERVAL = 0.05      # seconds; OpenRGB's KeepaliveThread resend threshold for this device
-    KEEPALIVE_DIRECT_ONLY = True   # OpenRGB only pings while active_mode == 0 (Direct)
+    KEEPALIVE_INTERVAL = 0.05  # seconds; OpenRGB's KeepaliveThread resend threshold for this device
+    KEEPALIVE_DIRECT_ONLY = True  # OpenRGB only pings while active_mode == 0 (Direct)
     TYPE_NAME = "Keyboard"
     DESCRIPTION = "HyperX device"
 
@@ -172,9 +188,21 @@ class _HyperXDevice:
         raise NotImplementedError
 
     def _make_device(self, modes: List[Mode], zones: List[Zone], led_names: List[str], version: str = "") -> Device:
-        return Device(0, self.TYPE_NAME, self.name, "HyperX", self.DESCRIPTION + " (direct hidraw, ported from OpenRGB)",
-                      version, _hid_serial(self.info.path), "HID: " + self.info.path, 0, modes, zones,
-                      led_names, [0] * len(led_names))
+        return Device(
+            0,
+            self.TYPE_NAME,
+            self.name,
+            "HyperX",
+            self.DESCRIPTION + " (direct hidraw, ported from OpenRGB)",
+            version,
+            _hid_serial(self.info.path),
+            "HID: " + self.info.path,
+            0,
+            modes,
+            zones,
+            led_names,
+            [0] * len(led_names),
+        )
 
     # -- transport hooks ------------------------------------------------------------------------------------------
     def _send_direct(self, colors: List[int]):
@@ -219,7 +247,8 @@ ORIGINS_LED_NAMES = _names(
     "F10|-|[|'|F11|=|]|#|/ (ABNT)|Menu|F12|Backspace|\\ (ANSI)|Enter|Right Shift|Right Control|Print Screen|Insert|"
     "Delete|Left Arrow|Scroll Lock|Home|End|Up Arrow|Down Arrow|Pause/Break|Page Up|Page Down|Right Arrow|Num Lock|"
     "Number Pad 7|Number Pad 4|Number Pad 1|Number Pad 0|Number Pad /|Number Pad 8|Number Pad 5|Number Pad 2|"
-    "Number Pad *|Number Pad 9|Number Pad 6|Number Pad 3|Number Pad .|Number Pad -|Number Pad +|Number Pad Enter")
+    "Number Pad *|Number Pad 9|Number Pad 6|Number Pad 3|Number Pad .|Number Pad -|Number Pad +|Number Pad Enter"
+)
 
 # RGBController_HyperXAlloyOrigins.cpp matrix_map[6][23]
 ORIGINS_MATRIX = [
@@ -240,7 +269,8 @@ ELITE2_LED_NAMES = _names(
     "Delete|Left Arrow|Scroll Lock|Home|End|Up Arrow|Down Arrow|Pause/Break|Page Up|Page Down|Right Arrow|Num Lock|"
     "Number Pad 7|Number Pad 4|Number Pad 1|Number Pad 0|Number Pad /|Number Pad 8|Number Pad 5|Number Pad 2|"
     "Media Mute|Number Pad *|Number Pad 9|Number Pad 6|Number Pad 3|Number Pad .|Media Previous|Number Pad -|"
-    "Number Pad +|Media Play/Pause|Media Next|Number Pad Enter") + [f"RGB Strip {i}" for i in range(1, 19)]
+    "Number Pad +|Media Play/Pause|Media Next|Number Pad Enter"
+) + [f"RGB Strip {i}" for i in range(1, 19)]
 
 # RGBController_HyperXAlloyElite2.cpp matrix_map[8][22]
 ELITE2_MATRIX = [
@@ -260,12 +290,17 @@ _ORIGINS60_ROWS = (
     "|Escape|1|2|3|4|5|6|7|8|9|0|-|=||Backspace|"
     "Tab|Q|W|E|R|T|Y|U|I|O|P|[|]|\\ (ANSI)|"
     "Caps Lock|A|S|D|F|G|H|J|K|L|;|'||Enter|"
-    "Left Shift||Z|X|C|V|B|N|M|,|.|/||Right Shift|")
-ORIGINS60_LED_NAMES = _names(_ORIGINS60_ROWS + "Left Control|Left Windows|Left Alt|~Left Space|Space|~Right Space|"
-                             "Right Alt|Menu|Right Control||||Right Fn")
-ORIGINS65_LED_NAMES = _names(_ORIGINS60_ROWS + "Left Control|Left Windows|Left Alt|~Left Space|Space|~Right Space|"
-                             "Right Alt||||Right Fn|Home|Delete|Page Up|Page Down|Up Arrow|Left Arrow|Down Arrow|"
-                             "Right Arrow")
+    "Left Shift||Z|X|C|V|B|N|M|,|.|/||Right Shift|"
+)
+ORIGINS60_LED_NAMES = _names(
+    _ORIGINS60_ROWS + "Left Control|Left Windows|Left Alt|~Left Space|Space|~Right Space|"
+    "Right Alt|Menu|Right Control||||Right Fn"
+)
+ORIGINS65_LED_NAMES = _names(
+    _ORIGINS60_ROWS + "Left Control|Left Windows|Left Alt|~Left Space|Space|~Right Space|"
+    "Right Alt||||Right Fn|Home|Delete|Page Up|Page Down|Up Arrow|Left Arrow|Down Arrow|"
+    "Right Arrow"
+)
 # RGBController_HyperXAlloyOrigins60and65.cpp matrix_map_60[5][14] / matrix_map_65[5][15]
 ORIGINS60_MATRIX = [
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15],
@@ -293,7 +328,7 @@ class HyperXAlloyOrigins(_HyperXDevice):
     SKIP: Tuple[int, ...] = ORIGINS_SKIP
     INIT_BYTE9 = 0x09
     PACKETS = 9
-    PAD_WITH_QUAD = True        # Origins pads with "0x81 00 00 00"; Elite 2 pads with an all-zero report
+    PAD_WITH_QUAD = True  # Origins pads with "0x81 00 00 00"; Elite 2 pads with an all-zero report
 
     def _build_device(self) -> Device:
         names = _fill_unused(self.LED_NAMES)
@@ -302,15 +337,15 @@ class HyperXAlloyOrigins(_HyperXDevice):
 
     def _send_direct(self, colors: List[int]):
         slots = list(colors)
-        for s in self.SKIP:                         # colors.insert(begin + skip_idx, 0) in OpenRGB
+        for s in self.SKIP:  # colors.insert(begin + skip_idx, 0) in OpenRGB
             slots.insert(s, 0)
-        init = bytearray(65)                        # SendDirectInitialization: 00 04 F2 .. [9]=09/05/00
+        init = bytearray(65)  # SendDirectInitialization: 00 04 F2 .. [9]=09/05/00
         init[1] = 0x04
         init[2] = 0xF2
         init[9] = self.INIT_BYTE9
         self.hid.send_feature(bytes(init))
         for p in range(self.PACKETS):
-            chunk = slots[p * 16:p * 16 + 16]
+            chunk = slots[p * 16 : p * 16 + 16]
             if chunk:
                 self.hid.send_feature(_quad_packet(chunk))
             elif self.PAD_WITH_QUAD:
@@ -336,6 +371,7 @@ class HyperXAlloyOrigins65(HyperXAlloyOrigins60):
 
 class HyperXAlloyElite2(HyperXAlloyOrigins):
     """RGBController_HyperXAlloyElite2.cpp: keepalive threshold 1000 ms (50 ms poll)."""
+
     DESCRIPTION = "HyperX Alloy Elite 2 Keyboard Device"
     KEEPALIVE_INTERVAL = 1.0
     LED_NAMES = ELITE2_LED_NAMES
@@ -351,22 +387,186 @@ class HyperXAlloyElite2(HyperXAlloyOrigins):
 # ----------------------------------------------------------------------------------------------------------------
 # HyperXAlloyEliteController.cpp / HyperXAlloyFPSController.cpp `keys[]`: byte offset of each of the 106 keys
 ELITE_KEY_OFFSETS = (
-    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14,
-    0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x20, 0x21, 0x22,
-    0x23, 0x24, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30,
-    0x31, 0x32, 0x33, 0x34, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3E, 0x3F, 0x41,
-    0x44, 0x45, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x51, 0x54, 0x55,
-    0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5E, 0x5F, 0x61, 0x64, 0x65, 0x68, 0x69, 0x6A,
-    0x6B, 0x6C, 0x6E, 0x6F, 0x74, 0x75, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E,
-    0x7F, 0x81, 0x84, 0x85, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F, 0x91,
-    0x94, 0x95)
+    0x08,
+    0x09,
+    0x0A,
+    0x0B,
+    0x0C,
+    0x0D,
+    0x0E,
+    0x0F,
+    0x10,
+    0x11,
+    0x12,
+    0x13,
+    0x14,
+    0x15,
+    0x16,
+    0x17,
+    0x18,
+    0x19,
+    0x1A,
+    0x1B,
+    0x1C,
+    0x1D,
+    0x1E,
+    0x20,
+    0x21,
+    0x22,
+    0x23,
+    0x24,
+    0x26,
+    0x27,
+    0x28,
+    0x29,
+    0x2A,
+    0x2B,
+    0x2C,
+    0x2D,
+    0x2E,
+    0x2F,
+    0x30,
+    0x31,
+    0x32,
+    0x33,
+    0x34,
+    0x37,
+    0x38,
+    0x39,
+    0x3A,
+    0x3B,
+    0x3C,
+    0x3E,
+    0x3F,
+    0x41,
+    0x44,
+    0x45,
+    0x48,
+    0x49,
+    0x4A,
+    0x4B,
+    0x4C,
+    0x4D,
+    0x4E,
+    0x4F,
+    0x51,
+    0x54,
+    0x55,
+    0x58,
+    0x59,
+    0x5A,
+    0x5B,
+    0x5C,
+    0x5E,
+    0x5F,
+    0x61,
+    0x64,
+    0x65,
+    0x68,
+    0x69,
+    0x6A,
+    0x6B,
+    0x6C,
+    0x6E,
+    0x6F,
+    0x74,
+    0x75,
+    0x78,
+    0x79,
+    0x7A,
+    0x7B,
+    0x7C,
+    0x7D,
+    0x7E,
+    0x7F,
+    0x81,
+    0x84,
+    0x85,
+    0x88,
+    0x89,
+    0x8A,
+    0x8B,
+    0x8C,
+    0x8D,
+    0x8E,
+    0x8F,
+    0x91,
+    0x94,
+    0x95,
+)
 # HyperXAlloyEliteController.cpp extended_red/grn/blu: offsets of the 18 strip LEDs + 4 media keys
-ELITE_EXT_RED = (0x08, 0x48, 0x88, 0x09, 0x89, 0x0A, 0x8A, 0x0B, 0x8B, 0x0C, 0x8C, 0x0D, 0x8D, 0x0E, 0x8F, 0x8E,
-                 0x0F, 0x4F, 0x92, 0x13, 0x93, 0x12)
-ELITE_EXT_GRN = (0x29, 0x28, 0x78, 0x19, 0x79, 0x1A, 0x7A, 0x1B, 0x7B, 0x1C, 0x7C, 0x1D, 0x7D, 0x1E, 0x6E, 0x7E,
-                 0x1F, 0x6F, 0x82, 0x23, 0x83, 0x22)
-ELITE_EXT_BLU = (0x39, 0x38, 0x68, 0x3A, 0x69, 0x2A, 0x6A, 0x2B, 0x6B, 0x2C, 0x6C, 0x2D, 0x6D, 0x2E, 0x5E, 0x5D,
-                 0x2F, 0x5F, 0x72, 0x33, 0x73, 0x32)
+ELITE_EXT_RED = (
+    0x08,
+    0x48,
+    0x88,
+    0x09,
+    0x89,
+    0x0A,
+    0x8A,
+    0x0B,
+    0x8B,
+    0x0C,
+    0x8C,
+    0x0D,
+    0x8D,
+    0x0E,
+    0x8F,
+    0x8E,
+    0x0F,
+    0x4F,
+    0x92,
+    0x13,
+    0x93,
+    0x12,
+)
+ELITE_EXT_GRN = (
+    0x29,
+    0x28,
+    0x78,
+    0x19,
+    0x79,
+    0x1A,
+    0x7A,
+    0x1B,
+    0x7B,
+    0x1C,
+    0x7C,
+    0x1D,
+    0x7D,
+    0x1E,
+    0x6E,
+    0x7E,
+    0x1F,
+    0x6F,
+    0x82,
+    0x23,
+    0x83,
+    0x22,
+)
+ELITE_EXT_BLU = (
+    0x39,
+    0x38,
+    0x68,
+    0x3A,
+    0x69,
+    0x2A,
+    0x6A,
+    0x2B,
+    0x6B,
+    0x2C,
+    0x6C,
+    0x2D,
+    0x6D,
+    0x2E,
+    0x5E,
+    0x5D,
+    0x2F,
+    0x5F,
+    0x72,
+    0x33,
+    0x73,
+    0x32,
+)
 
 ELITE_KEY_NAMES = _names(
     "Escape|`|Tab|Caps Lock|Left Shift|Left Control|F12|=|F9|9|O|L|,|Menu|Enter (ISO)|Left Arrow|F1|1|Q|A|\\ (ISO)|"
@@ -375,7 +575,8 @@ ELITE_KEY_NAMES = _names(
     "Number Pad 8|Number Pad /|Number Pad 1|F5|5|T|G|V|Home|Page Down|Number Pad 9|Number Pad *|Number Pad 2|F6|6|Y|"
     "H|B|Page Up|Right Shift|Number Pad -|Number Pad 3|F7|7|U|J|N|Right Alt|]|Right Control|Number Pad 4|"
     "Number Pad +|Number Pad 0|F8|8|I|K|M|Right Windows|\\ (ANSI)|Up Arrow|Number Pad 5|Number Pad Enter|"
-    "Number Pad .")
+    "Number Pad ."
+)
 # RGBController_HyperXAlloyElite.cpp / RGBController_HyperXAlloyFPS.cpp matrix_map[6][23] (identical)
 ELITE_MATRIX = [
     [0, NA, 16, 30, 44, 54, NA, 65, 75, 84, 95, NA, 8, 23, 38, 6, 22, 36, 49, NA, NA, NA, NA],
@@ -395,8 +596,9 @@ ELITE_COLOR_SINGLE, ELITE_COLOR_DUAL, ELITE_COLOR_SPECTRUM = 0x00, 0x01, 0x02
 
 class HyperXAlloyFPS(_HyperXDevice):
     """Alloy FPS RGB (0951:16DC, interface 2, usage page 0xFF01). HyperXAlloyFPSController.cpp."""
+
     DESCRIPTION = "HyperX Alloy FPS Device"
-    PLANE_DELAY = 0.010         # std::this_thread::sleep_for(10ms) between channel planes
+    PLANE_DELAY = 0.010  # std::this_thread::sleep_for(10ms) between channel planes
 
     def _build_device(self) -> Device:
         n = len(ELITE_KEY_NAMES)
@@ -426,25 +628,49 @@ class HyperXAlloyFPS(_HyperXDevice):
 class HyperXAlloyElite(HyperXAlloyFPS):
     """Alloy Elite RGB (0951:16BE, interface 2, usage page 0xFF01). HyperXAlloyEliteController.cpp.
     Direct mode streams 4 planes (R, G, B, extended); onboard Static/Wave/Breathing are written to profile 1."""
+
     DESCRIPTION = "HyperX Alloy Elite Device"
     PLANE_DELAY = 0.005
-    LED_NAMES = ELITE_KEY_NAMES + [f"RGB Strip {i}" for i in range(1, 19)] + _names(
-        "Media Previous|Media Play/Pause|Media Next|Media Mute")
+    LED_NAMES = (
+        ELITE_KEY_NAMES
+        + [f"RGB Strip {i}" for i in range(1, 19)]
+        + _names("Media Previous|Media Play/Pause|Media Next|Media Mute")
+    )
 
     def _build_device(self) -> Device:
-        zones = [Zone(0, "Keyboard", ZONE_MATRIX, 106, 106, 106, [list(r) for r in ELITE_MATRIX], 0),
-                 Zone(1, "RGB Strip", ZONE_LINEAR, 18, 18, 18, None, 106),
-                 Zone(2, "Media Keys", ZONE_SINGLE, 4, 4, 4, None, 124)]
+        zones = [
+            Zone(0, "Keyboard", ZONE_MATRIX, 106, 106, 106, [list(r) for r in ELITE_MATRIX], 0),
+            Zone(1, "RGB Strip", ZONE_LINEAR, 18, 18, 18, None, 106),
+            Zone(2, "Media Keys", ZONE_SINGLE, 4, 4, 4, None, 124),
+        ]
         auto = MODE_FLAG_AUTOMATIC_SAVE
         modes = [
             Mode(0, "Direct", ELITE_MODE_STATIC, MODE_FLAG_HAS_PER_LED_COLOR, color_mode=MODE_COLORS_PER_LED),
             Mode(1, "Static", ELITE_MODE_STATIC, MODE_FLAG_HAS_PER_LED_COLOR | auto, color_mode=MODE_COLORS_PER_LED),
-            Mode(2, "Wave", ELITE_MODE_WAVE, MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_DIRECTION_LR | auto,
-                 speed_min=0x00, speed_max=0x09, speed=0x09, direction=0, color_mode=MODE_COLORS_NONE),
-            Mode(3, "Breathing", ELITE_MODE_BREATHING,
-                 MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_RANDOM_COLOR | auto,
-                 speed_min=0x00, speed_max=0x09, speed=0x09, colors_min=1, colors_max=2,
-                 color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[0, 0]),
+            Mode(
+                2,
+                "Wave",
+                ELITE_MODE_WAVE,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_DIRECTION_LR | auto,
+                speed_min=0x00,
+                speed_max=0x09,
+                speed=0x09,
+                direction=0,
+                color_mode=MODE_COLORS_NONE,
+            ),
+            Mode(
+                3,
+                "Breathing",
+                ELITE_MODE_BREATHING,
+                MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_MODE_SPECIFIC_COLOR | MODE_FLAG_HAS_RANDOM_COLOR | auto,
+                speed_min=0x00,
+                speed_max=0x09,
+                speed=0x09,
+                colors_min=1,
+                colors_max=2,
+                color_mode=MODE_COLORS_MODE_SPECIFIC,
+                colors=[0, 0],
+            ),
         ]
         return self._make_device(modes, zones, list(self.LED_NAMES))
 
@@ -469,9 +695,9 @@ class HyperXAlloyElite(HyperXAlloyFPS):
         rgb = [u32_to_rgb(c) for c in colors[:106]]
         for ch, idx in ((ELITE_CH_RED, 0), (ELITE_CH_GREEN, 1), (ELITE_CH_BLUE, 2)):
             plane = [t[idx] for t in rgb]
-            if direct:                                                      # SendDirect: 07 16 <ch> A0
+            if direct:  # SendDirect: 07 16 <ch> A0
                 self.hid.send_feature(self._plane(ELITE_PKT_DIRECT, ch, 0xA0, plane))
-            else:                                                           # SendColor: 07 06 <profile=1> <ch>
+            else:  # SendColor: 07 06 <profile=1> <ch>
                 self.hid.send_feature(self._plane(ELITE_PKT_SET_COLOR, 0x01, ch, plane))
             time.sleep(self.PLANE_DELAY)
         if direct:
@@ -510,7 +736,7 @@ class HyperXAlloyElite(HyperXAlloyFPS):
         buf = bytearray(264)
         buf[0x00] = 0x07
         buf[0x01] = ELITE_PKT_SET_EFFECT
-        buf[0x02] = 0x01                      # profile
+        buf[0x02] = 0x01  # profile
         buf[0x09] = 0x01
         buf[0x0A] = effect & 0xFF
         buf[0x0D] = direction & 0xFF
@@ -537,28 +763,126 @@ CORE_VARIANT_ANSI, CORE_VARIANT_ABNT2 = 0x09, 0x10
 # KeyboardLayoutManager.cpp: TKL = main block + function row + extras, sorted by (row, col). Index order here is the
 # order the manager ends up with, which is what RGBController_HyperXAlloyOriginsCore.cpp's default values index.
 _CORE_BASE: List[Tuple[int, int, str]] = (
-    [(0, 0, "Escape")] + [(0, c + 2, f"F{c + 1}") for c in range(12)]
+    [(0, 0, "Escape")]
+    + [(0, c + 2, f"F{c + 1}") for c in range(12)]
     + [(0, 14, "Print Screen"), (0, 15, "Scroll Lock"), (0, 16, "Pause/Break")]
-    + [(1, 0, "`")] + [(1, c, str(c % 10)) for c in range(1, 11)]
+    + [(1, 0, "`")]
+    + [(1, c, str(c % 10)) for c in range(1, 11)]
     + [(1, 11, "-"), (1, 12, "="), (1, 13, "Backspace"), (1, 14, "Insert"), (1, 15, "Home"), (1, 16, "Page Up")]
-    + [(2, 0, "Tab")] + [(2, c + 1, k) for c, k in enumerate("QWERTYUIOP")]
+    + [(2, 0, "Tab")]
+    + [(2, c + 1, k) for c, k in enumerate("QWERTYUIOP")]
     + [(2, 11, "["), (2, 12, "]"), (2, 13, "\\ (ANSI)"), (2, 14, "Delete"), (2, 15, "End"), (2, 16, "Page Down")]
-    + [(3, 0, "Caps Lock")] + [(3, c + 1, k) for c, k in enumerate("ASDFGHJKL")]
+    + [(3, 0, "Caps Lock")]
+    + [(3, c + 1, k) for c, k in enumerate("ASDFGHJKL")]
     + [(3, 10, ";"), (3, 11, "'"), (3, 12, "#"), (3, 13, "Enter")]
-    + [(4, 0, "Left Shift"), (4, 1, "\\ (ISO)")] + [(4, c + 2, k) for c, k in enumerate("ZXCVBNM")]
+    + [(4, 0, "Left Shift"), (4, 1, "\\ (ISO)")]
+    + [(4, c + 2, k) for c, k in enumerate("ZXCVBNM")]
     + [(4, 9, ","), (4, 10, "."), (4, 11, "/"), (4, 13, "Right Shift"), (4, 15, "Up Arrow")]
-    + [(5, 0, "Left Control"), (5, 1, "Left Windows"), (5, 2, "Left Alt"), (5, 6, "Space"), (5, 10, "Right Alt"),
-       (5, 11, "Right Fn"), (5, 12, "Menu"), (5, 13, "Right Control"), (5, 14, "Left Arrow"), (5, 15, "Down Arrow"),
-       (5, 16, "Right Arrow")]
+    + [
+        (5, 0, "Left Control"),
+        (5, 1, "Left Windows"),
+        (5, 2, "Left Alt"),
+        (5, 6, "Space"),
+        (5, 10, "Right Alt"),
+        (5, 11, "Right Fn"),
+        (5, 12, "Menu"),
+        (5, 13, "Right Control"),
+        (5, 14, "Left Arrow"),
+        (5, 15, "Down Arrow"),
+        (5, 16, "Right Arrow"),
+    ]
 )
 # RGBController_HyperXAlloyOriginsCore.cpp hyperx_core_default_values (LED slot per key, same order as _CORE_BASE)
 CORE_DEFAULT_VALUES = (
-    0, 1, 2, 3, 4, 5, 6, 7, 48, 49, 50, 51, 52, 53, 54, 55,
-    8, 9, 10, 11, 12, 13, 14, 15, 16, 56, 57, 58, 59, 60, 61, 62, 63,
-    17, 18, 19, 20, 21, 22, 23, 24, 64, 65, 66, 67, 68, 69, 70, 71, 72,
-    25, 26, 27, 28, 29, 30, 31, 32, 73, 74, 75, 76, 77, 78,
-    33, 34, 35, 36, 37, 38, 39, 40, 79, 80, 81, 82, 84, 85,
-    41, 42, 43, 45, 86, 87, 88, 89, 90, 91, 92,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    64,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    73,
+    74,
+    75,
+    76,
+    77,
+    78,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    79,
+    80,
+    81,
+    82,
+    84,
+    85,
+    41,
+    42,
+    43,
+    45,
+    86,
+    87,
+    88,
+    89,
+    90,
+    91,
+    92,
 )
 
 
@@ -566,9 +890,9 @@ CORE_DEFAULT_VALUES = (
 class _CoreKey:
     row: int
     col: int
-    name: str        # OpenRGB key name ("Key: A"), "" = unused
-    alt: str = ""    # regional alternate name, preferred when present
-    value: int = 0   # LED slot in the 94-slot color buffer
+    name: str  # OpenRGB key name ("Key: A"), "" = unused
+    alt: str = ""  # regional alternate name, preferred when present
+    value: int = 0  # LED slot in the 94-slot color buffer
 
 
 def core_keymap(variant: int) -> List[_CoreKey]:
@@ -578,15 +902,21 @@ def core_keymap(variant: int) -> List[_CoreKey]:
     def at(row: int, col: int) -> Optional[_CoreKey]:
         return next((k for k in keys if k.row == row and k.col == col), None)
 
-    def remove(row: int, col: int):                      # KEYBOARD_OPCODE_SWAP_ONLY with KEY_EN_UNUSED
+    def remove(row: int, col: int):  # KEYBOARD_OPCODE_SWAP_ONLY with KEY_EN_UNUSED
         k = at(row, col)
         if k:
             keys.remove(k)
 
     if variant == CORE_VARIANT_ABNT2:
         # KeyboardLayoutManager.cpp `abnt2` overlay
-        for (r, c), alt in {(1, 0): "Key: '", (2, 11): "Key: ´ `", (2, 12): "Key: [", (3, 10): "Key: ç",
-                            (3, 11): "Key: ~", (3, 12): "Key: ]"}.items():
+        for (r, c), alt in {
+            (1, 0): "Key: '",
+            (2, 11): "Key: ´ `",
+            (2, 12): "Key: [",
+            (3, 10): "Key: ç",
+            (3, 11): "Key: ~",
+            (3, 12): "Key: ]",
+        }.items():
             k = at(r, c)
             if k:
                 k.alt = alt
@@ -596,7 +926,7 @@ def core_keymap(variant: int) -> List[_CoreKey]:
             if k.row == 4 and k.col >= 11:
                 k.col += 1
         keys.insert(pos, _CoreKey(4, 11, "Key: ;"))
-        remove(2, 13)                                     # SWAP_ONLY unused @ (2, 13): drop ANSI backslash
+        remove(2, 13)  # SWAP_ONLY unused @ (2, 13): drop ANSI backslash
         # REMOVE_SHIFT_LEFT @ (4, 13): no key there, so the keys right of it move one column left
         for k in keys:
             if k.row == 4 and k.col > 13:
@@ -616,6 +946,7 @@ def core_keymap(variant: int) -> List[_CoreKey]:
 class HyperXAlloyOriginsCore(_HyperXDevice):
     """Alloy Origins Core (0951:16E6 / 03F0:098F, interface 2). HyperXAlloyOriginsCoreController.cpp:
     output reports (hid_write), 380-byte GRB buffer streamed as 0xA2 packets, brightness via 0xA7."""
+
     DESCRIPTION = "HyperX Alloy Origins Core Keyboard Device"
     BRIGHTNESS_MIN, BRIGHTNESS_MAX = 0, 255
 
@@ -651,8 +982,12 @@ class HyperXAlloyOriginsCore(_HyperXDevice):
         names = _fill_unused([k.alt or k.name for k in self.keys])
         n = len(names)
         zone = Zone(0, "Keyboard", ZONE_MATRIX, n, n, n, matrix)
-        direct = _direct_mode(MODE_FLAG_HAS_BRIGHTNESS, brightness_min=self.BRIGHTNESS_MIN,
-                              brightness_max=self.BRIGHTNESS_MAX, brightness=self.BRIGHTNESS_MAX)
+        direct = _direct_mode(
+            MODE_FLAG_HAS_BRIGHTNESS,
+            brightness_min=self.BRIGHTNESS_MIN,
+            brightness_max=self.BRIGHTNESS_MAX,
+            brightness=self.BRIGHTNESS_MAX,
+        )
         return self._make_device([direct], [zone], names)
 
     def color_buffer(self, colors: List[int]) -> bytes:
@@ -678,7 +1013,7 @@ class HyperXAlloyOriginsCore(_HyperXDevice):
             pkt[1] = 0xA2
             pkt[2] = seq
             pkt[4] = payload
-            pkt[5:] = data[sent:sent + payload]
+            pkt[5:] = data[sent : sent + payload]
             self.hid.write(bytes(pkt))
             seq += 1
             sent += payload
@@ -692,7 +1027,7 @@ class HyperXAlloyOriginsCore(_HyperXDevice):
 
     def set_mode(self, mode: Mode, save: bool = False):
         self.device.active_mode = mode.index
-        self.set_brightness(mode.brightness)             # DeviceUpdateMode -> SetBrightness
+        self.set_brightness(mode.brightness)  # DeviceUpdateMode -> SetBrightness
 
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -704,7 +1039,8 @@ ORIGINS2_65_LED_NAMES = _names(
     "Caps Lock|A|S|D|F|G|H|J|K|L|;|'|#|Enter (ISO)|Page Up|"
     "Left Shift|Z|X|C|V|B|N|M|,|.|/|Right Shift|Up Arrow||Page Down|"
     "Left Control|\\ (ISO)|Left Windows|Left Alt||~Left Space|Space|~Right Space||Right Alt|Right Fn|Left Arrow|"
-    "Down Arrow|Right Arrow")
+    "Down Arrow|Right Arrow"
+)
 # RGBController_HyperXOrigins2_65.cpp matrix_map[5][15]
 ORIGINS2_65_MATRIX = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
@@ -722,12 +1058,13 @@ def _report44(cmd: int, b2: int, colors: Sequence[int]) -> bytes:
     buf[1] = cmd
     buf[2] = b2
     for i, c in enumerate(colors[:20]):
-        buf[4 + i * 3:7 + i * 3] = u32_to_rgb(c)
+        buf[4 + i * 3 : 7 + i * 3] = u32_to_rgb(c)
     return bytes(buf)
 
 
 class HyperXOrigins2_65(_HyperXDevice):
     """Origins 2 65 (03F0:0CC2, interface 3). HyperXOrigins2_65Controller.cpp: init 44 01 04, 4 x (44 02 seq)."""
+
     DESCRIPTION = "HyperX Origins 2 65 Keyboard Device"
 
     def _build_device(self) -> Device:
@@ -739,12 +1076,13 @@ class HyperXOrigins2_65(_HyperXDevice):
     def _send_direct(self, colors: List[int]):
         self.hid.write(_report44(0x01, 0x04, []))
         for seq in range(4):
-            chunk = colors[seq * 20:seq * 20 + 20] or [0]
+            chunk = colors[seq * 20 : seq * 20 + 20] or [0]
             self.hid.write(_report44(0x02, seq, chunk))
 
 
 class HyperXEve1800(_HyperXDevice):
     """Eve 1800 (03F0:08C2, interface 2). HyperXEve1800Controller.cpp: 10 zones in one 44 02 report, brightness 40 01."""
+
     DESCRIPTION = "HyperX Eve 1800 Keyboard Device"
     ZONES = 10
 
@@ -767,7 +1105,7 @@ class HyperXEve1800(_HyperXDevice):
 
     def set_mode(self, mode: Mode, save: bool = False):
         self.device.active_mode = mode.index
-        self.set_brightness(mode.brightness)             # DeviceUpdateMode: brightness, then the frame again
+        self.set_brightness(mode.brightness)  # DeviceUpdateMode: brightness, then the frame again
         if self.last_frame is not None:
             self._send_direct(self.last_frame)
 
@@ -778,12 +1116,16 @@ class HyperXEve1800(_HyperXDevice):
 class HyperXPulsefireSurge(_HyperXDevice):
     """Pulsefire Surge (0951:16D3 / 03F0:0490, interface 1, usage page 0xFF01). HyperXPulsefireSurgeController.cpp:
     one 264-byte feature report 07 14 00 A0 with R/G/B planes for the 32-LED ring and RGB for the logo."""
+
     TYPE_NAME = "Mouse"
     DESCRIPTION = "HyperX Pulsefire Surge Device"
     PKT_DIRECT = 0x14
 
     def _build_device(self) -> Device:
-        zones = [Zone(0, "LED Strip", ZONE_LINEAR, 32, 32, 32, None, 0), Zone(1, "Logo", ZONE_SINGLE, 1, 1, 1, None, 32)]
+        zones = [
+            Zone(0, "LED Strip", ZONE_LINEAR, 32, 32, 32, None, 0),
+            Zone(1, "Logo", ZONE_SINGLE, 1, 1, 1, None, 32),
+        ]
         names = [f"LED Strip LED {i + 1}" for i in range(32)] + ["Logo"]
         return self._make_device([_direct_mode()], zones, names)
 
@@ -802,13 +1144,14 @@ class HyperXPulsefireSurge(_HyperXDevice):
 
     def set_mode(self, mode: Mode, save: bool = False):
         self.device.active_mode = mode.index
-        if self.last_frame is not None:                  # DeviceUpdateMode -> DeviceUpdateLEDs
+        if self.last_frame is not None:  # DeviceUpdateMode -> DeviceUpdateLEDs
             self._send_direct(self.last_frame)
 
 
 class HyperXPulsefireFPSPro(HyperXPulsefireSurge):
     """Pulsefire FPS Pro (0951:16D7) and Pulsefire Core (0951:16DE / 03F0:0D8F), interface 1, usage page 0xFF01.
     HyperXPulsefireFPSProController.cpp: 264-byte feature report 07 0A R G B 00 00 00 A0."""
+
     DESCRIPTION = "HyperX Pulsefire FPS Pro Device"
     PKT_DIRECT = 0x0A
 
@@ -828,14 +1171,23 @@ class HyperXPulsefireRaid(_HyperXDevice):
     """Pulsefire Raid (0951:16E4, interface 1, usage page 0xFF01, usage 0x01). HyperXPulsefireRaidController.cpp:
     264-byte feature report 07 0A R1 G1 B1 R2 G2 B2 A0, 10 ms after each; keepalive threshold 1 s.
     OpenRGB flags brightness on Direct but never sends it (the controller has no brightness packet)."""
+
     TYPE_NAME = "Mouse"
     DESCRIPTION = "HyperX Pulsefire Raid Device"
     KEEPALIVE_INTERVAL = 1.0
 
     def _build_device(self) -> Device:
         zones = [Zone(0, "Scroll Wheel", ZONE_SINGLE, 1, 1, 1, None, 0), Zone(1, "Logo", ZONE_SINGLE, 1, 1, 1, None, 1)]
-        direct = Mode(0, "Direct", 0x00, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS,
-                      brightness_min=0x00, brightness_max=0x64, brightness=0x64, color_mode=MODE_COLORS_PER_LED)
+        direct = Mode(
+            0,
+            "Direct",
+            0x00,
+            MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS,
+            brightness_min=0x00,
+            brightness_max=0x64,
+            brightness=0x64,
+            color_mode=MODE_COLORS_PER_LED,
+        )
         return self._make_device([direct], zones, ["Scroll Wheel", "Logo"])
 
     def _send_direct(self, colors: List[int]):
@@ -843,7 +1195,7 @@ class HyperXPulsefireRaid(_HyperXDevice):
         buf[0] = 0x07
         buf[1] = 0x0A
         for i in range(2):
-            buf[3 * i + 2:3 * i + 5] = u32_to_rgb(colors[i])
+            buf[3 * i + 2 : 3 * i + 5] = u32_to_rgb(colors[i])
         buf[8] = 0xA0
         self.hid.send_feature(bytes(buf))
         time.sleep(0.010)
@@ -852,6 +1204,7 @@ class HyperXPulsefireRaid(_HyperXDevice):
 class HyperXPulsefireHaste(_HyperXDevice):
     """Pulsefire Haste (0951:1727, 03F0:0F8F). HyperXPulsefireHasteController.cpp: two 65-byte feature reports,
     00 04 F2 .. [8]=02 then 00 81 R G B .. [8]=02."""
+
     TYPE_NAME = "Mouse"
     DESCRIPTION = "HyperX Pulsefire Haste Device"
 
@@ -888,23 +1241,53 @@ class HyperXPulsefireDart(_HyperXDevice):
     page 0xFF13). HyperXPulsefireDartController.cpp: 65-byte output reports 00 D2 <led> <mode> 08 RGB RGB <bri> <spd>,
     2 ms after each; 00 DE FF saves to onboard memory. No keepalive thread in OpenRGB.
     Note: OpenRGB's speed range is inverted (speed_min 0x64 is slowest, speed_max 0x00 fastest)."""
+
     TYPE_NAME = "Mouse"
     DESCRIPTION = "HyperX Pulsefire Dart Device"
-    KEEPALIVE_INTERVAL = 0.0     # OpenRGB has no keepalive for this device
+    KEEPALIVE_INTERVAL = 0.0  # OpenRGB has no keepalive for this device
 
     def _build_device(self) -> Device:
         zones = [Zone(0, "Scroll Wheel", ZONE_SINGLE, 1, 1, 1, None, 0), Zone(1, "Logo", ZONE_SINGLE, 1, 1, 1, None, 1)]
-        bri = dict(brightness_min=DART_BRIGHTNESS_MIN, brightness_max=DART_BRIGHTNESS_MAX, brightness=DART_BRIGHTNESS_MAX)
+        bri = dict(
+            brightness_min=DART_BRIGHTNESS_MIN, brightness_max=DART_BRIGHTNESS_MAX, brightness=DART_BRIGHTNESS_MAX
+        )
         per_led = MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_HAS_BRIGHTNESS | MODE_FLAG_MANUAL_SAVE
         with_speed = MODE_FLAG_HAS_SPEED | MODE_FLAG_HAS_BRIGHTNESS | MODE_FLAG_MANUAL_SAVE
         modes = [
             Mode(0, "Direct", DART_MODE_STATIC, per_led, speed=DART_SPEED_NONE, color_mode=MODE_COLORS_PER_LED, **bri),
-            Mode(1, "Breathing", DART_MODE_BREATHING, per_led | MODE_FLAG_HAS_SPEED, speed_min=DART_SPEED_MIN,
-                 speed_max=DART_SPEED_MAX, speed=DART_SPEED_MED, color_mode=MODE_COLORS_PER_LED, **bri),
-            Mode(2, "Spectrum Cycle", DART_MODE_CYCLE, with_speed, speed_min=DART_SPEED_MIN, speed_max=DART_SPEED_MAX,
-                 speed=DART_SPEED_MED, color_mode=MODE_COLORS_NONE, **bri),
-            Mode(3, "Reactive", DART_MODE_REACTIVE, per_led | MODE_FLAG_HAS_SPEED, speed_min=DART_SPEED_MIN,
-                 speed_max=DART_SPEED_MAX, speed=DART_SPEED_MED, color_mode=MODE_COLORS_PER_LED, **bri),
+            Mode(
+                1,
+                "Breathing",
+                DART_MODE_BREATHING,
+                per_led | MODE_FLAG_HAS_SPEED,
+                speed_min=DART_SPEED_MIN,
+                speed_max=DART_SPEED_MAX,
+                speed=DART_SPEED_MED,
+                color_mode=MODE_COLORS_PER_LED,
+                **bri,
+            ),
+            Mode(
+                2,
+                "Spectrum Cycle",
+                DART_MODE_CYCLE,
+                with_speed,
+                speed_min=DART_SPEED_MIN,
+                speed_max=DART_SPEED_MAX,
+                speed=DART_SPEED_MED,
+                color_mode=MODE_COLORS_NONE,
+                **bri,
+            ),
+            Mode(
+                3,
+                "Reactive",
+                DART_MODE_REACTIVE,
+                per_led | MODE_FLAG_HAS_SPEED,
+                speed_min=DART_SPEED_MIN,
+                speed_max=DART_SPEED_MAX,
+                speed=DART_SPEED_MED,
+                color_mode=MODE_COLORS_PER_LED,
+                **bri,
+            ),
         ]
         return self._make_device(modes, zones, ["Scroll Wheel", "Logo"])
 
@@ -953,6 +1336,7 @@ class HyperXMousemat(_HyperXDevice):
     """Fury Ultra (0951:1705), Pulsefire Mat (03F0:0F8D), Pulsefire Mat RGB XL (0951:1741).
     HyperXMousematController.cpp SendDirect: 00 04 F2 .. [9]=02, then two 16-entry 0x81-quad reports (32 slots;
     OpenRGB reads past its 20/2-colour vector there - we send zeros)."""
+
     TYPE_NAME = "Mousemat"
     DESCRIPTION = "HyperX Mousemat Device"
     KEEPALIVE_DIRECT_ONLY = True
@@ -966,11 +1350,14 @@ class HyperXMousemat(_HyperXDevice):
         zones: List[Zone] = []
         names: List[str] = []
         if self.underglow:
-            zones.append(Zone(len(zones), "Underglow", ZONE_LINEAR, self.underglow, self.underglow, self.underglow,
-                              None, 0))
+            zones.append(
+                Zone(len(zones), "Underglow", ZONE_LINEAR, self.underglow, self.underglow, self.underglow, None, 0)
+            )
             names += [f"Underglow LED {i + 1}" for i in range(self.underglow)] if self.underglow > 1 else ["Underglow"]
         if self.strip:
-            zones.append(Zone(len(zones), "LED Strip", ZONE_LINEAR, self.strip, self.strip, self.strip, None, len(names)))
+            zones.append(
+                Zone(len(zones), "LED Strip", ZONE_LINEAR, self.strip, self.strip, self.strip, None, len(names))
+            )
             names += [f"LED Strip LED {i + 1}" for i in range(self.strip)] if self.strip > 1 else ["LED Strip"]
         return self._make_device([_direct_mode()], zones, names)
 
@@ -996,13 +1383,16 @@ class HyperXMousemat(_HyperXDevice):
 class HyperXQuadCastS(_HyperXDevice):
     """QuadCast S / DuoCast, interface 0. HyperXMicrophoneController.cpp: 65-byte feature reports, 15 ms pacing.
     Direct = colour packet (81 RGB 81 RGB) + register 0xF2; save = 0x53 transaction with one frame."""
+
     TYPE_NAME = "Microphone"
     DESCRIPTION = "HyperX Microphone Device"
     KEEPALIVE_DIRECT_ONLY = False
     PACE = 0.015
 
     def _build_device(self) -> Device:
-        direct = Mode(0, "Direct", 0, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_MANUAL_SAVE, color_mode=MODE_COLORS_PER_LED)
+        direct = Mode(
+            0, "Direct", 0, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_MANUAL_SAVE, color_mode=MODE_COLORS_PER_LED
+        )
         return self._make_device([direct], [Zone(0, "Microphone", ZONE_SINGLE, 2, 2, 2)], ["Top", "Bottom"])
 
     @staticmethod
@@ -1011,9 +1401,9 @@ class HyperXQuadCastS(_HyperXDevice):
         for i, (top, bot) in enumerate(pairs[:8]):
             idx = 8 * i
             buf[idx + 1] = 0x81
-            buf[idx + 2:idx + 5] = u32_to_rgb(top)
+            buf[idx + 2 : idx + 5] = u32_to_rgb(top)
             buf[idx + 5] = 0x81
-            buf[idx + 6:idx + 9] = u32_to_rgb(bot)
+            buf[idx + 6 : idx + 9] = u32_to_rgb(bot)
         return bytes(buf)
 
     def _register(self, reg: int, p1: int, p2: int):
@@ -1037,10 +1427,10 @@ class HyperXQuadCastS(_HyperXDevice):
         self._register(0x53, packets, 0)
         for p in range(packets):
             time.sleep(self.PACE)
-            self.hid.send_feature(self._color_packet(pairs[p * 8:p * 8 + 8]))
+            self.hid.send_feature(self._color_packet(pairs[p * 8 : p * 8 + 8]))
         self._register(0x02, 0, 0)
         self._register(0x23, 1, 0)
-        eot = bytearray(65)                              # SendEOT
+        eot = bytearray(65)  # SendEOT
         eot[0x01] = 0x08
         eot[0x3C] = 0x28
         eot[0x3D] = frames & 0xFF
@@ -1049,7 +1439,7 @@ class HyperXQuadCastS(_HyperXDevice):
         self.hid.send_feature(bytes(eot))
         time.sleep(self.PACE)
         self._register(0x02, 0, 0)
-        self._send_direct(colors)                        # "likes one temporary direct packet after the save"
+        self._send_direct(colors)  # "likes one temporary direct packet after the save"
 
     def set_mode(self, mode: Mode, save: bool = False):
         self.device.active_mode = mode.index
@@ -1078,6 +1468,7 @@ class HyperXQuadCast2S(_HyperXDevice):
     """QuadCast 2 S (03F0:02B5, interface 1, usage page 0xFF13, usage 0xFF00). HyperXMicrophoneV2Controller.cpp:
     64-byte output reports (report id 0x44), each answered by the device echoing bytes 0-1 at offsets 14-15;
     6 colour packets of 20 LEDs. Keepalive threshold 1 s (250 ms poll)."""
+
     TYPE_NAME = "Microphone"
     DESCRIPTION = "HyperX Microphone Device"
     KEEPALIVE_INTERVAL = 1.0
@@ -1092,8 +1483,15 @@ class HyperXQuadCast2S(_HyperXDevice):
         super().__init__(hid, info, name)
 
     def _build_device(self) -> Device:
-        direct = Mode(0, "Direct", 0, MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_MANUAL_SAVE, colors_min=self.LEDS,
-                      colors_max=self.LEDS, color_mode=MODE_COLORS_PER_LED)
+        direct = Mode(
+            0,
+            "Direct",
+            0,
+            MODE_FLAG_HAS_PER_LED_COLOR | MODE_FLAG_MANUAL_SAVE,
+            colors_min=self.LEDS,
+            colors_max=self.LEDS,
+            color_mode=MODE_COLORS_PER_LED,
+        )
         zone = Zone(0, "Microphone", ZONE_MATRIX, self.LEDS, self.LEDS, self.LEDS, [list(r) for r in QUADCAST2S_MATRIX])
         return self._make_device([direct], [zone], [f"LED {i}" for i in range(self.LEDS)])
 
@@ -1104,8 +1502,11 @@ class HyperXQuadCast2S(_HyperXDevice):
             if self.errors >= 5:
                 self.hid.drain()
             if self.errors >= 10:
-                log.warning("%s: repeated communication errors; another program (NGENUITY?) may own the device; "
-                            "pausing updates for 5 s", self.name)
+                log.warning(
+                    "%s: repeated communication errors; another program (NGENUITY?) may own the device; "
+                    "pausing updates for 5 s",
+                    self.name,
+                )
                 self.pause_until = now + 5
                 self.errors = 0
         else:
@@ -1125,8 +1526,8 @@ class HyperXQuadCast2S(_HyperXDevice):
             buf[0] = 0x44
             buf[1] = cmd
             buf[2] = p
-            for c, col in enumerate(colors[p * 20:p * 20 + 20]):
-                buf[4 + 3 * c:7 + 3 * c] = u32_to_rgb(col)
+            for c, col in enumerate(colors[p * 20 : p * 20 + 20]):
+                buf[4 + 3 * c : 7 + 3 * c] = u32_to_rgb(col)
             self._xfer(bytes(buf))
 
     def _send_direct(self, colors: List[int]):
@@ -1140,7 +1541,7 @@ class HyperXQuadCast2S(_HyperXDevice):
             return
         self._xfer(bytes([0x44, 0x03, 0x01, 0x06]) + bytes(60))
         self._color_packets(colors, 0x04)
-        self._xfer(bytes([0x42, 0x02, 0x00, 0x00, 0x00, 0xE8, 0x03]) + bytes(57))    # "framerate" (static frame)
+        self._xfer(bytes([0x42, 0x02, 0x00, 0x00, 0x00, 0xE8, 0x03]) + bytes(57))  # "framerate" (static frame)
         self._xfer(bytes([0x40, 0x01, 0x00, 0x00, 0xFF]) + bytes(59))
 
     def set_mode(self, mode: Mode, save: bool = False):
@@ -1161,9 +1562,9 @@ class _Rule:
     pid: int
     name: str
     factory: Callable[[HidDevice, HidInfo, str], _HyperXDevice]
-    iface: int = -1          # -1 = any interface
-    page: int = -1           # -1 = any usage page
-    usage: int = -1          # -1 = any usage
+    iface: int = -1  # -1 = any interface
+    page: int = -1  # -1 = any usage page
+    usage: int = -1  # -1 = any usage
 
 
 def _mat(underglow: int, strip: int):
@@ -1259,6 +1660,11 @@ def probe() -> List[_HyperXDevice]:
                 continue
             claimed[key] = True
             found.append(drv)
-            log.info("%s: %d LEDs on %s (interface %d) [EXPERIMENTAL, unverified port]", rule.name,
-                     len(drv.device.led_names), info.path, info.interface)
+            log.info(
+                "%s: %d LEDs on %s (interface %d) [EXPERIMENTAL, unverified port]",
+                rule.name,
+                len(drv.device.led_names),
+                info.path,
+                info.interface,
+            )
     return found

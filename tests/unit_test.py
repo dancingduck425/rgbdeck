@@ -1,4 +1,5 @@
 """Hardware-free checks: effect engine, keyboard geometry, color panel state, packet encoders."""
+
 import os
 import sys
 import time
@@ -23,8 +24,21 @@ def check(cond, msg):
 def fake_keyboard():
     names = ["Key: " + USAGE_NAMES[k] for k in sorted(USAGE_NAMES) if k < 0x66 or k >= 0xE0]
     names = [n for n in names if "(ISO)" not in n and "(JIS)" not in n and "Number Pad =" not in n]
-    return Device(0, "Keyboard", "Fake", "Test", "", "", "", "", 0, [Mode(0, "Direct", -1, 0)],
-                  [Zone(0, "Keyboard", 2, len(names), len(names), len(names))], names, [0] * len(names))
+    return Device(
+        0,
+        "Keyboard",
+        "Fake",
+        "Test",
+        "",
+        "",
+        "",
+        "",
+        0,
+        [Mode(0, "Direct", -1, 0)],
+        [Zone(0, "Keyboard", 2, len(names), len(names), len(names))],
+        names,
+        [0] * len(names),
+    )
 
 
 # --- colors
@@ -63,13 +77,16 @@ check(all(KEYMAP[v] for v in ("KEY_A", "KEY_SPACE", "KEY_KP7", "KEY_F12")), "evd
 check(EVDEV_CODES[30] == "KEY_A" and EVDEV_CODES[57] == "KEY_SPACE", "embedded key-code table")
 
 # --- Logitech period mapping
-check(_slider_to_period(1, 1000, 20000) == 20000 and _slider_to_period(100, 1000, 20000) == 1000, "speed slider -> period")
+check(
+    _slider_to_period(1, 1000, 20000) == 20000 and _slider_to_period(100, 1000, 20000) == 1000, "speed slider -> period"
+)
 
 # --- color panel keeps hue through brightness 0 (needs Qt)
 try:
     from PySide6.QtWidgets import QApplication
     from PySide6.QtGui import QColor
     import rgbdeck.app as app_mod
+
     app = QApplication.instance() or QApplication([])
     cp = app_mod.ColorPanel()
     cp.setColor(QColor("#ff6a00"))
