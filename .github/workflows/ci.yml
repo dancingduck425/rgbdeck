@@ -28,7 +28,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -m compileall -q rgbdeck tests
-          python -c "import rgbdeck.app, rgbdeck.backend, rgbdeck.effects, rgbdeck.hw.logitech_hidpp, rgbdeck.hw.glorious_gmow, rgbdeck.hw.asus_aura_usb, rgbdeck.hw.openrgb_bridge; print('imports ok')"
+          python -c "import rgbdeck.app, rgbdeck.backend, rgbdeck.effects, rgbdeck.hw.logitech_hidpp, rgbdeck.hw.glorious_gmow, rgbdeck.hw.asus_aura_usb; print('imports ok')"
       - name: Unit tests (no hardware)
         env:
           QT_QPA_PLATFORM: offscreen

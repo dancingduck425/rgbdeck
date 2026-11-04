@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDialog, Q
 from rgbdeck.models import (Device, Mode, DeviceError, MODE_COLORS_MODE_SPECIFIC, MODE_COLORS_PER_LED,  # noqa: E402
                     MODE_COLORS_RANDOM, DIRECTION_NAMES, rgb_to_u32, u32_to_rgb)
 from rgbdeck.backend import LocalBackend  # noqa: E402
-from rgbdeck.hw import openrgb_bridge  # noqa: E402
 
 log = logging.getLogger("rgbdeck")
 LOG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "rgbdeck" / "rgbdeck.log"
@@ -1208,17 +1207,6 @@ class SettingsDialog(QDialog):
         self.fps.setValue(int(settings.get("fx_fps", 24)))
         self.fps.setToolTip("Frames per second for typing effects. Most keyboards manage 20–30.")
         form.addRow("Effect speed (fps)", self.fps)
-        self.bridge = QCheckBox("Use OpenRGB for devices RGB Deck has no native driver for")
-        self.bridge.setChecked(settings.get("openrgb_bridge", False))
-        self.bridge.setEnabled(openrgb_bridge.available())
-        tip = ("Starts an OpenRGB SDK server with a private config in which the natively driven families are "
-               "disabled, so nothing is controlled twice.") if openrgb_bridge.available() else               "OpenRGB is not installed (package 'openrgb'), so this is unavailable."
-        self.bridge.setToolTip(tip)
-        form.addRow("Other devices", self.bridge)
-        hint = QLabel(tip)
-        hint.setObjectName("hint")
-        hint.setWordWrap(True)
-        form.addRow("", hint)
         lf = QLabel(f"Log file: {LOG_FILE}")
         lf.setObjectName("hint")
         form.addRow("", lf)
@@ -1230,7 +1218,6 @@ class SettingsDialog(QDialog):
     def apply(self) -> dict:
         self.settings["sync"] = self.sync.isChecked()
         self.settings["fx_fps"] = self.fps.value()
-        self.settings["openrgb_bridge"] = self.bridge.isChecked()
         launcher = Path.home() / ".local/bin/rgbdeck"
         if self.tray_start.isChecked():
             TRAY_AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -2074,16 +2061,12 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(dict(self.settings), self)
         if dlg.exec() != QDialog.Accepted:
             return
-        before_bridge = self.settings.get("openrgb_bridge", False)
         self.settings.update(dlg.apply())
         save_json(SETTINGS_FILE, self.settings)
         self.sync_chk.setChecked(self.settings.get("sync", True))
         if self.engine:
             self.engine.settings.fps = int(self.settings.get("fx_fps", 24))
             self._fx_timer.setInterval(int(1000 / max(10, self.engine.settings.fps)))
-        if self.settings.get("openrgb_bridge", False) != before_bridge:
-            self.client.use_openrgb_bridge = self.settings.get("openrgb_bridge", False)
-            self._rescan()
 
     def _show_help(self):
         QMessageBox.information(self, "How to use RGB Deck",
@@ -2286,8 +2269,7 @@ def main(argv: List[str]) -> int:
     icon_path = Path(__file__).resolve().parent / "data" / "rgbdeck.svg"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
-    settings = load_json(SETTINGS_FILE, {})
-    client = LocalBackend(use_openrgb_bridge=settings.get("openrgb_bridge", False))
+    client = LocalBackend()
     client.connect()
     if not client.devices:
         msg = client.last_error or ""
@@ -2297,7 +2279,7 @@ def main(argv: List[str]) -> int:
         else:
             QMessageBox.information(None, APP_NAME, "No supported RGB devices found right now.\n\n"
                                     "RGB Deck keeps watching — plug a device in and it appears automatically. "
-                                    "If another program (OpenRGB, G HUB under Wine) is using the device, close it first."
+                                    "If another program is using the device, close it first."
                                     + (f"\n\nDetails: {msg}" if msg else ""))
     w = MainWindow(client)
     if "--tray" in argv and w.tray.isVisible():

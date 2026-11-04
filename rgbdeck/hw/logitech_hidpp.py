@@ -41,7 +41,7 @@ KEYS_PER_FRAME = 14
 KT_KEYBOARD = 0x0001      # keyIds are USB HID keyboard usages
 KT_INDICATOR = 0x0040     # logos / lock indicators / G-key clusters (device specific)
 
-# USB HID keyboard usage -> OpenRGB-style key name (which keyboard_layout.py and effects.py understand)
+# USB HID keyboard usage -> key name (which keyboard_layout.py and effects.py understand)
 USAGE_NAMES: Dict[int, str] = {
     0x28: "Enter", 0x29: "Escape", 0x2A: "Backspace", 0x2B: "Tab", 0x2C: "Space", 0x2D: "-", 0x2E: "=",
     0x2F: "[", 0x30: "]", 0x31: "\\ (ANSI)", 0x32: "# (ISO)", 0x33: ";", 0x34: "'", 0x35: "`", 0x36: ",",
@@ -146,7 +146,7 @@ class LogitechKeyboard:
                     return buf[4:]
             if busy:
                 time.sleep(0.03)
-        raise DeviceError("keyboard did not answer (is another program such as OpenRGB using it?)")
+        raise DeviceError("keyboard did not answer (is another program using it?)")
 
     def _get_feature_index(self, feature_id: int) -> int:
         return self._send(0x00, 0x00, bytes([(feature_id >> 8) & 0xFF, feature_id & 0xFF]))[0]

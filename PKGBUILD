@@ -3,13 +3,12 @@
 pkgname=rgbdeck
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="Standalone RGB lighting control for keyboards, mice and motherboards (direct hidraw, no OpenRGB required)"
+pkgdesc="Standalone RGB lighting control for keyboards, mice and motherboards (own drivers, direct hidraw)"
 arch=('any')
 url="https://github.com/dancingduck425/rgbdeck"
 license=('GPL-2.0-only')
 depends=('python' 'pyside6' 'hicolor-icon-theme')
-optdepends=('python-evdev: extra key names for typing effects on exotic keys'
-            'openrgb: optional bridge for devices without a native driver')
+optdepends=('python-evdev: extra key names for typing effects on exotic keys')
 source=()
 
 package() {

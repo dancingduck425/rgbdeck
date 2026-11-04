@@ -2,7 +2,7 @@
 Software (app-driven) keyboard effects: reactive key glow and ripples.
 
 Key presses come from evdev (/dev/input/event*). Frames are rendered onto the
-user's own per-key colors and pushed through the OpenRGB SDK at a capped rate.
+user's own per-key colors and pushed to the keyboard at a capped rate.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ _EV_FMT = "llHHi"
 _EV_SIZE = struct.calcsize(_EV_FMT)
 EV_KEY = 0x01
 
-# evdev KEY_* name -> OpenRGB LED name (after "Key: ")
+# evdev KEY_* name -> LED name (after "Key: ")
 KEYMAP: Dict[str, str] = {
     "KEY_ESC": "Escape", "KEY_GRAVE": "`", "KEY_MINUS": "-", "KEY_EQUAL": "=", "KEY_BACKSPACE": "Backspace",
     "KEY_TAB": "Tab", "KEY_LEFTBRACE": "[", "KEY_RIGHTBRACE": "]", "KEY_BACKSLASH": "\\ (ANSI)",

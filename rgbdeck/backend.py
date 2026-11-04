@@ -3,7 +3,6 @@ Local hardware backend.
 
 - Native drivers (rgbdeck.hw.*) talk straight to /dev/hidraw. Each exposes probe() -> [driver],
   where a driver has .device, set_colors(), set_mode(), optional read_colors()/battery(), close().
-- Optional OpenRGB bridge for anything without a native driver (Settings).
 - All writes go through one worker thread, coalesced per (device, kind), so the UI never blocks.
 """
 from __future__ import annotations
@@ -16,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from rgbdeck.models import Device, DeviceError, Mode
 from rgbdeck.hw import hidraw
-from rgbdeck.hw import logitech_hidpp, glorious_gmow, asus_aura_usb, openrgb_bridge
+from rgbdeck.hw import logitech_hidpp, glorious_gmow, asus_aura_usb
 
 log = logging.getLogger("rgbdeck.backend")
 
@@ -24,9 +23,8 @@ NATIVE_DRIVERS = (logitech_hidpp, glorious_gmow, asus_aura_usb)
 
 
 class LocalBackend:
-    def __init__(self, use_openrgb_bridge: bool = False):
+    def __init__(self):
         self.devices: List[Device] = []
-        self.use_openrgb_bridge = use_openrgb_bridge
         self._drivers: Dict[int, object] = {}
         self._seen: set = set()
         self.last_error = ""
@@ -141,12 +139,6 @@ class LocalBackend:
                 except Exception as e:  # noqa: BLE001
                     log.exception("probe failed in %s", mod.__name__)
                     errors.append(f"{mod.__name__}: {e}")
-            try:
-                for drv in openrgb_bridge.probe(self.use_openrgb_bridge):
-                    self._adopt(drv, old)
-            except Exception as e:  # noqa: BLE001
-                log.exception("OpenRGB bridge probe failed")
-                errors.append(f"OpenRGB bridge: {e}")
         self.last_error = "; ".join(errors)
         self._seen = self._fingerprint()
         log.info("devices: %s", [f"{d.type_name}:{d.name}" for d in self.devices])

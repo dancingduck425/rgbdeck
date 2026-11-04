@@ -6,11 +6,10 @@ import time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rgbdeck.models import Device, Mode, Zone, MODE_COLORS_MODE_SPECIFIC, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR, rgb_to_u32, u32_to_rgb  # noqa: E402
+from rgbdeck.models import Device, Mode, Zone, rgb_to_u32, u32_to_rgb  # noqa: E402
 from rgbdeck.keyboard_layout import build_geometry  # noqa: E402
 from rgbdeck.effects import EffectEngine, KEYMAP, EVDEV_CODES  # noqa: E402
 from rgbdeck.hw.logitech_hidpp import USAGE_NAMES, _display_order, _slider_to_period  # noqa: E402
-from rgbdeck.hw import openrgb_bridge  # noqa: E402
 
 fails = []
 
@@ -65,12 +64,6 @@ check(EVDEV_CODES[30] == "KEY_A" and EVDEV_CODES[57] == "KEY_SPACE", "embedded k
 
 # --- Logitech period mapping
 check(_slider_to_period(1, 1000, 20000) == 20000 and _slider_to_period(100, 1000, 20000) == 1000, "speed slider -> period")
-
-# --- OpenRGB mode packet encoder shape
-m = Mode(2, "Static", 1, MODE_FLAG_HAS_MODE_SPECIFIC_COLOR, colors_min=1, colors_max=1,
-         color_mode=MODE_COLORS_MODE_SPECIFIC, colors=[0x112233])
-pkt = openrgb_bridge._pack_mode(m)
-check(pkt[:2] == b"\x07\x00" and pkt[2:9] == b"Static\0" and pkt.endswith(b"\x01\x00\x33\x22\x11\x00"), "OpenRGB mode packet layout")
 
 # --- color panel keeps hue through brightness 0 (needs Qt)
 try:

@@ -19,4 +19,4 @@ labels: device
 ```
 ```
 
-**Does OpenRGB control it?** (yes/no/unknown — helps locate the protocol)
+**Does any other software control it on Linux?** (which one — helps locate the protocol)

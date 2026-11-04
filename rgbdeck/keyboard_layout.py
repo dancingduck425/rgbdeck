@@ -1,5 +1,5 @@
 """
-Physical key geometry for drawing a keyboard from OpenRGB LED names.
+Physical key geometry for drawing a keyboard from its LED names.
 
 Units: 1.0 = one standard key. Each entry: (led name suffix, x, y, w, h, label).
 Names are matched against the device's LED names after stripping "Key: ".
@@ -126,7 +126,7 @@ def build_keyboard_geometry(dev: Device) -> Optional[List[KeyGeom]]:
 
 
 def build_matrix_geometry(dev: Device, zone: Zone, y0: float) -> List[KeyGeom]:
-    """Fallback: draw the OpenRGB matrix map as a grid; merge equal neighbours into wide keys."""
+    """Fallback: draw a device matrix map as a grid; merge equal neighbours into wide keys."""
     geoms: List[KeyGeom] = []
     for r, row in enumerate(zone.matrix):
         c = 0

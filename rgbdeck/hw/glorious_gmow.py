@@ -92,7 +92,7 @@ class GloriousMouse:
     def set_mode(self, mode: Mode, save: bool = False):
         # Lighting is stored PER ONBOARD PROFILE (byte 7 = profile 1..3) and the mouse shows its
         # active profile, which we cannot read. Writing all three makes the change visible no matter
-        # which one is active (Glorious CORE / OpenRGB only wrote profile 1, which is why a mouse
+        # which one is active (other tools only wrote profile 1, which is why a mouse
         # left on profile 2 or 3 never seemed to react). The active profile is never touched.
         self.device.active_mode = mode.index
         for profile in (1, 2, 3):
