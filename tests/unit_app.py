@@ -10,6 +10,7 @@ import types
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 TMP = tempfile.mkdtemp(prefix="rgbdeck-unit-")
 os.environ["XDG_CONFIG_HOME"] = TMP
+os.environ["APPDATA"] = TMP  # Windows config root
 os.environ["HOME"] = TMP
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -101,6 +102,8 @@ backend.hidraw.enumerate_hid = lambda *a, **k: []
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 import rgbdeck.app as app_mod  # noqa: E402
+
+app_mod.IS_WINDOWS = False  # login entries as files in TMP on every platform (never touch a real registry)
 
 app = QApplication.instance() or QApplication([])
 client = backend.LocalBackend()
