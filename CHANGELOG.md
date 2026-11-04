@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 — 2026-11-04
+
+- New native driver families, ported byte-for-byte from GPL-2.0 driver sources with packet-level unit tests
+  (experimental until confirmed on hardware): Razer Chroma (182 device IDs incl. receivers), Logitech mice /
+  headsets / Lightspeed & Unifying receivers, Corsair peripherals (legacy + iCUE V2), Corsair Lighting Node /
+  Commander PRO, SteelSeries (mice, Apex keyboards, headsets, QcK Prism), HyperX (Alloy keyboards, Pulsefire
+  mice, mats, QuadCast).
+- Drivers are auto-discovered from `rgbdeck/hw/`; udev rules generated from their USB ID lists (411 IDs).
+- Per-driver keepalive heartbeats (boards that fall back to onboard lighting without one).
+- LED-count controls for resizable zones (LED strips / fan hubs), remembered per device.
+- Backend worker unit tests (coalescing, ordering, error isolation, keepalive, hotplug).
+- Removed every runtime trace of OpenRGB.
+
 ## 1.0.0 — 2026-11-04
 
 First public release.

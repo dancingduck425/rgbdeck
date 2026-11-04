@@ -28,8 +28,9 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -m compileall -q rgbdeck tests
-          python -c "import rgbdeck.app, rgbdeck.backend, rgbdeck.effects, rgbdeck.hw.logitech_hidpp, rgbdeck.hw.glorious_gmow, rgbdeck.hw.asus_aura_usb; print('imports ok')"
+          python -c "import rgbdeck.app, rgbdeck.backend; from rgbdeck.backend import discover_drivers; mods=discover_drivers(); print('drivers:', [m.__name__ for m in mods]); assert len(mods) >= 3"
       - name: Unit tests (no hardware)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python tests/unit_test.py
+        run: |
+          for t in tests/unit*.py; do echo "== $t"; python "$t" || exit 1; done

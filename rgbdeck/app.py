@@ -1333,6 +1333,16 @@ class MainWindow(QMainWindow):
         self.seg_buttons["device"].setChecked(True)
         head.addLayout(seg)
         cv_lay.addLayout(head)
+        self.zone_row = QWidget()
+        zl = QHBoxLayout(self.zone_row)
+        zl.setContentsMargins(0, 0, 0, 0)
+        zl.setSpacing(8)
+        self.zone_lbl = QLabel("LEDs per channel")
+        self.zone_lbl.setObjectName("hint")
+        zl.addWidget(self.zone_lbl)
+        self.zone_spins: Dict[int, QSpinBox] = {}
+        self.zone_row.setVisible(False)
+        cv_lay.addWidget(self.zone_row)
         self.canvas = LedCanvas()
         self.canvas.paintRequested.connect(self._paint_leds)
         self.canvas.colorPicked.connect(lambda c: self.color_panel.setColor(c))
@@ -1469,6 +1479,15 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ devices
     def _populate_devices(self):
+        sizes = self.settings.get("zone_sizes", {})
+        for d in self.client.devices:
+            for z in d.zones:
+                want = sizes.get(f"{d.name}|{z.index}")
+                if want is not None and z.leds_min != z.leds_max and want != z.leds_count:
+                    try:
+                        self.client.resize_zone(d, z.index, int(want))
+                    except DeviceError:
+                        pass
         for t in self.tabs:
             self.tabs_lay.removeWidget(t)
             t.deleteLater()
@@ -1511,6 +1530,7 @@ class MainWindow(QMainWindow):
         self.dev_title.setText(title)
         geoms = build_geometry(d)
         self.canvas.set_device(geoms, d.colors, d.type_name, device_colors_preview(d))
+        self._build_zone_row(d)
         has_keys = bool(geoms)
         for k in ("paint", "select"):
             self.seg_buttons[k].setEnabled(has_keys)
@@ -1527,6 +1547,38 @@ class MainWindow(QMainWindow):
         self.dim_slider.setEnabled(has_keys)
         self._selection_changed()
         self._refresh_tabs()
+
+    def _build_zone_row(self, d: Device):
+        lay = self.zone_row.layout()
+        while lay.count() > 1:
+            w = lay.takeAt(1).widget()
+            if w:
+                w.deleteLater()
+        self.zone_spins = {}
+        resizable = [z for z in d.zones if z.leds_min != z.leds_max]
+        self.zone_row.setVisible(bool(resizable))
+        for z in resizable:
+            lbl = QLabel(z.name)
+            sp = QSpinBox()
+            sp.setRange(z.leds_min, z.leds_max)
+            sp.setValue(z.leds_count)
+            sp.setToolTip(f"How many LEDs are connected to {z.name} ({z.leds_min}–{z.leds_max})")
+            sp.editingFinished.connect(lambda zi=z.index, box=sp: self._resize_zone(zi, box.value()))
+            lay.addWidget(lbl)
+            lay.addWidget(sp)
+            self.zone_spins[z.index] = sp
+        lay.addStretch(1)
+
+    def _resize_zone(self, zone_index: int, count: int):
+        if not self.dev:
+            return
+        try:
+            if self.client.resize_zone(self.dev, zone_index, count):
+                self.settings.setdefault("zone_sizes", {})[f"{self.dev.name}|{zone_index}"] = count
+                save_json(SETTINGS_FILE, self.settings)
+                self._rescan()
+        except DeviceError as e:
+            self.statusBar().showMessage(f"Device error: {e}")
 
     def _refresh_tabs(self):
         for t in self.tabs:

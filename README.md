@@ -15,16 +15,27 @@ own drivers — no vendor software, no background daemon, no third-party RGB sof
 
 ![RGB Deck](docs/screenshot.png)
 
-## Supported natively
+## Supported hardware
 
-| Family | Notes |
-|---|---|
-| Logitech HID++ 2.0 RGB keyboards (G512, G513, G810, G815, G910, G915/TKL, PRO…) | keys discovered from the device; ANSI/ISO/JIS aware |
-| Glorious Model O / O- / D / D- Wireless (cable or dongle) | lighting written to all 3 onboard profiles; battery readout |
-| ASUS Aura USB mainboards (0b05:19af and relatives) | direct color + onboard effects |
+Every driver is native (`rgbdeck/hw/`). The first three were developed and verified on real hardware; the rest
+were ported byte-for-byte from GPL-2.0 driver sources with packet-level unit tests, but have **not yet been run
+on physical devices** — they are marked *experimental*. If you own one, please try it and open an issue either way.
 
-Other devices: every driver is a small module in `rgbdeck/hw/` — see [CONTRIBUTING.md](CONTRIBUTING.md)
-for how to add one. Open a device-support issue with your `lsusb` line if you'd like yours added.
+| Family | Devices | Status |
+|---|---|---|
+| Logitech HID++ 2.0 keyboards | G512, G513, G810, G815, G910, G915/TKL, PRO… (keys discovered from the device; ANSI/ISO/JIS) | verified |
+| Glorious wireless mice | Model O / O- / D / D- Wireless, cable or dongle (all 3 onboard profiles, battery) | verified |
+| ASUS Aura USB mainboards | 0b05:19af and relatives (direct color + onboard effects) | verified |
+| Razer Chroma | 182 keyboards, Blade laptops, mice, mousepads, keypads, headsets, accessories; paired devices through receivers | experimental |
+| Logitech mice & headsets | G203/G303/G403/G502/G703/G900/G903/G Pro families, G633/G635/G733/G933/G935; Lightspeed, Powerplay and Unifying receivers | experimental |
+| Corsair peripherals | K55/K65/K68/K70/K95/Strafe, M65/Scimitar/Glaive/Harpoon/Ironclaw/Nightsword/Dark Core, MM800, ST100, and the newer iCUE "V2" keyboards/mice/mousemats | experimental |
+| Corsair Lighting Node / Commander | Lighting Node PRO & CORE, Commander PRO LED channels, LS100, LT100, 1000D, SPEC OMEGA (set your LED count per channel in the app) | experimental |
+| SteelSeries | Rival 100–710, Rival 3/5, Sensei, Aerox 3/5/9, Apex 3/5/7/9/Pro/TKL/M750, Arctis 5/Nova 3, Siberia 350, QcK Prism | experimental |
+| HyperX | Alloy Origins/60/65/Core/Elite/Elite 2/FPS, Pulsefire Surge/Core/FPS Pro/Dart/Raid/Haste, Fury Ultra & Pulsefire mats, QuadCast S/2 S, DuoCast | experimental |
+
+Not supported on purpose: RAM and GPU lighting (driven over I²C/SMBus, where a bad write can brick a module — not
+something to ship untested). Everything else: see [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a driver, or
+open a device-support issue with your `lsusb` line.
 
 ## Install
 
@@ -37,7 +48,7 @@ git clone https://github.com/dancingduck425/rgbdeck.git ~/src/rgbdeck && cd ~/sr
 
 Dependencies: Python ≥ 3.10, PySide6. Optional: `python-evdev`.
 
-Device access: `70-rgbdeck.rules` grants the logged-in user access via `uaccess`. Replug the device
+Device access: `70-rgbdeck.rules` (generated from every driver's USB ID list by `tools/gen_udev_rules.py`) grants the logged-in user access via `uaccess`. Replug the device
 (or reboot) after installing the rule. Typing effects read `/dev/input/event*`, which logind already
 grants to the active seat.
 

@@ -15,8 +15,12 @@ driver.battery() -> (percent, on_cable)       # optional
 driver.close()
 ```
 
-Register the module in `rgbdeck/backend.py` (`NATIVE_DRIVERS`) and add its VID/PIDs to
-`rgbdeck/data/70-rgbdeck.rules`.
+Drivers are discovered automatically (any module under `rgbdeck/hw/` with a `probe()`). Add a module-level
+`USB_IDS = [(vid, pid), ...]` and run `python3 tools/gen_udev_rules.py` to regenerate the udev rules.
+Optional extras the backend understands: `keepalive()` + `keepalive_interval` (seconds) for boards that need a
+heartbeat, `battery()`, `read_colors()`, and `resize_zone(zone_index, count)` for zones with `leds_min != leds_max`.
+Add a hardware-free `tests/unit_<name>.py` that asserts exact packet bytes through a fake `HidDevice` — CI runs every
+`tests/unit*.py`.
 
 Good protocol sources: USB captures of the vendor software (Wireshark + USBPcap) and existing open-source
 driver code for the device (GPL-2.0 sources are license-compatible with this project).
