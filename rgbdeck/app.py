@@ -11,13 +11,25 @@ import logging
 import math
 import os
 import random
+import secrets
 import socket
+import subprocess
 import sys
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSocketNotifier, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QPointF,
+    QRect,
+    QRectF,
+    QSize,
+    QSocketNotifier,
+    Qt,
+    QTimer,
+    Signal,
+    __version__ as QT_VERSION_STR,
+)
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -78,14 +90,23 @@ from rgbdeck.backend import LocalBackend  # noqa: E402
 from rgbdeck import __version__  # noqa: E402
 
 log = logging.getLogger("rgbdeck")
-LOG_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "rgbdeck" / "rgbdeck.log"
-TRAY_AUTOSTART_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "autostart" / "rgbdeck.desktop"
+IS_WINDOWS = sys.platform == "win32"
+
+
+def _config_root() -> Path:
+    if IS_WINDOWS:
+        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+
+LOG_FILE = _config_root() / "rgbdeck" / "rgbdeck.log"
+TRAY_AUTOSTART_FILE = _config_root() / "autostart" / "rgbdeck.desktop"  # Linux; Windows uses the Run registry key
 
 
 def setup_logging(verbose: bool):
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     handlers = [logging.FileHandler(LOG_FILE)]
-    if verbose:
+    if verbose and sys.stderr is not None:  # a windowed Windows build has no console
         handlers.append(logging.StreamHandler())
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
@@ -98,27 +119,128 @@ from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
 from rgbdeck.effects import EffectEngine, EffectSettings, KeyListener, find_keyboard_events  # noqa: E402
 
 APP_NAME = "RGB Deck"
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "rgbdeck"
+CONFIG_DIR = _config_root() / "rgbdeck"
 PRESETS_FILE = CONFIG_DIR / "presets.json"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
-AUTOSTART_FILE = (
-    Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "autostart" / "rgbdeck-apply.desktop"
-)
+AUTOSTART_FILE = _config_root() / "autostart" / "rgbdeck-apply.desktop"  # Linux; Windows uses the registry
+CONTROL_FILE = CONFIG_DIR / "control.json"  # Windows: port + token of the running instance
 
 ACCENT = "#7c6cff"
-CONTROL_SOCKET = "\0rgbdeck-" + str(os.getuid())  # abstract unix socket: one running instance per user
+# One running instance per user. Linux: an abstract unix socket. Windows (no AF_UNIX in Python): a loopback
+# TCP port, published with a random token in CONTROL_FILE so only this user's processes can drive it.
+CONTROL_SOCKET = "\0rgbdeck-" + (str(os.getuid()) if hasattr(os, "getuid") else os.environ.get("USERNAME", ""))
+CONTROL_TOKEN = ""
+
+
+def _control_connect() -> socket.socket:
+    """Connect to the running instance's control channel (OSError / ValueError if there is none)."""
+    if IS_WINDOWS:
+        info = json.loads(CONTROL_FILE.read_text())
+        sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sk.settimeout(3.0)
+        sk.connect(("127.0.0.1", int(info["port"])))
+        sk.sendall((str(info["token"]) + " ").encode())
+        return sk
+    sk = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sk.settimeout(3.0)
+    sk.connect(CONTROL_SOCKET)
+    return sk
 
 
 def send_control(cmd: str) -> Optional[str]:
     """Talk to a running RGB Deck. None if none is running."""
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sk:
-            sk.settimeout(3.0)
-            sk.connect(CONTROL_SOCKET)
+        with _control_connect() as sk:
             sk.sendall(cmd.encode() + b"\n")
             return sk.recv(4096).decode(errors="replace").strip()
-    except OSError:
+    except (OSError, ValueError, KeyError):
         return None
+
+
+def control_listen() -> Optional[socket.socket]:
+    """Bind the control channel for this instance; None if another instance already owns it."""
+    global CONTROL_TOKEN
+    if IS_WINDOWS:
+        if send_control("ping") == "pong":
+            return None
+        sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sk.bind(("127.0.0.1", 0))
+        CONTROL_TOKEN = secrets.token_hex(16)
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        CONTROL_FILE.write_text(json.dumps({"port": sk.getsockname()[1], "token": CONTROL_TOKEN}))
+    else:
+        sk = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sk.bind(CONTROL_SOCKET)
+        except OSError:
+            sk.close()
+            return None
+    sk.listen(4)
+    sk.setblocking(False)
+    return sk
+
+
+def launch_command() -> List[str]:
+    """How to start this very installation of RGB Deck (for the login entries)."""
+    if getattr(sys, "frozen", False):  # PyInstaller build
+        return [sys.executable]
+    if IS_WINDOWS:
+        pyw = Path(sys.executable).with_name("pythonw.exe")
+        return [str(pyw if pyw.exists() else sys.executable), "-m", "rgbdeck"]
+    launcher = Path.home() / ".local/bin/rgbdeck"
+    return [str(launcher)] if launcher.exists() else [sys.executable, "-m", "rgbdeck"]
+
+
+_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_AUTOSTART = {"tray": (TRAY_AUTOSTART_FILE, "RGB Deck"), "apply": (AUTOSTART_FILE, "RGB Deck preset")}
+
+
+def _desktop_quote(arg: str) -> str:
+    """Quote one argument for a desktop-entry Exec= line (double quotes, not shell quoting)."""
+    if arg and not any(ch in arg for ch in " \t\"'\\$`<>~|&;*?#()"):
+        return arg
+    return '"' + arg.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`") + '"'
+
+
+def autostart_enabled(kind: str) -> bool:
+    path, value = _AUTOSTART[kind]
+    if not IS_WINDOWS:
+        return path.exists()
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+            winreg.QueryValueEx(key, value)
+        return True
+    except OSError:
+        return False
+
+
+def set_autostart(kind: str, args: Optional[List[str]]):
+    """Start RGB Deck with these extra arguments at login ("tray" / "apply" entry); None removes the entry."""
+    path, value = _AUTOSTART[kind]
+    if IS_WINDOWS:
+        import winreg
+
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+            if args is None:
+                try:
+                    winreg.DeleteValue(key, value)
+                except OSError:
+                    pass
+            else:
+                winreg.SetValueEx(key, value, 0, winreg.REG_SZ, subprocess.list2cmdline(launch_command() + args))
+        return
+    if args is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    exec_line = " ".join(_desktop_quote(a) for a in launch_command() + args)
+    path.write_text(
+        "[Desktop Entry]\nType=Application\n"
+        + ("Name=RGB Deck (apply preset)\nNoDisplay=true\n" if kind == "apply" else "Name=RGB Deck\n")
+        + f"Exec={exec_line}\nIcon=rgbdeck\nTerminal=false\nX-GNOME-Autostart-Delay=5\n"
+    )
 
 
 DEFAULT_PALETTE = [
@@ -1351,7 +1473,7 @@ class SettingsDialog(QDialog):
         self.sync.setChecked(settings.get("sync", True))
         form.addRow("Sync", self.sync)
         self.tray_start = QCheckBox("Start RGB Deck minimized in the tray when I log in")
-        self.tray_start.setChecked(TRAY_AUTOSTART_FILE.exists())
+        self.tray_start.setChecked(autostart_enabled("tray"))
         form.addRow("Login", self.tray_start)
         self.fps = QSpinBox()
         self.fps.setRange(10, 40)
@@ -1369,17 +1491,10 @@ class SettingsDialog(QDialog):
     def apply(self) -> dict:
         self.settings["sync"] = self.sync.isChecked()
         self.settings["fx_fps"] = self.fps.value()
-        launcher = Path.home() / ".local/bin/rgbdeck"
-        if self.tray_start.isChecked():
-            TRAY_AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
-            exec_cmd = str(launcher) if launcher.exists() else f"{sys.executable} -m rgbdeck"
-            TRAY_AUTOSTART_FILE.write_text(
-                "[Desktop Entry]\nType=Application\nName=RGB Deck\n"
-                f"Exec={exec_cmd} --tray\nIcon=rgbdeck\nTerminal=false\n"
-                "X-GNOME-Autostart-Delay=5\n"
-            )
-        else:
-            TRAY_AUTOSTART_FILE.unlink(missing_ok=True)
+        try:
+            set_autostart("tray", ["--tray"] if self.tray_start.isChecked() else None)
+        except OSError as e:
+            log.error("could not update the login entry: %s", e)
         return self.settings
 
 
@@ -2120,15 +2235,14 @@ class MainWindow(QMainWindow):
         if not self.listener:
             return
         if self.listener.ok:
+            where = "(global keyboard hook)" if IS_WINDOWS else f"on {len(self.listener.paths)} input device(s)"
             self.effects.listen_lbl.setText(
-                f"Listening for key presses on {len(self.listener.paths)} input device(s). "
-                "Keep RGB Deck running (it can sit in the tray) for the effect to work."
+                f"Listening for key presses {where}. Keep RGB Deck running (it can sit in the tray) for the effect to work."
             )
         else:
+            why = "" if IS_WINDOWS else ". Your user needs read access to /dev/input/event* (the 'input' group)."
             self.effects.listen_lbl.setText(
-                "Couldn't read key presses: "
-                + (self.listener.error or "no keyboard input device found")
-                + ". Your user needs read access to /dev/input/event* (the 'input' group)."
+                "Couldn't read key presses: " + (self.listener.error or "no keyboard input device found") + why
             )
 
     def _stop_app_effect(self, keep_mode: bool = False):
@@ -2222,7 +2336,7 @@ class MainWindow(QMainWindow):
             w = self.presets_lay.takeAt(0).widget()
             if w:
                 w.deleteLater()
-        auto = self.settings.get("autostart_preset") if AUTOSTART_FILE.exists() else None
+        auto = self.settings.get("autostart_preset") if autostart_enabled("apply") else None
         for name in sorted(self.presets):
             c = PresetCard(name, self.presets[name], name == auto)
             c.clicked.connect(lambda _c=False, n=name: self._apply_preset(n))
@@ -2263,7 +2377,7 @@ class MainWindow(QMainWindow):
     def _preset_menu(self, name, pos):
         menu = QMenu(self)
         a_apply = menu.addAction("Apply")
-        auto_on = self.settings.get("autostart_preset") == name and AUTOSTART_FILE.exists()
+        auto_on = self.settings.get("autostart_preset") == name and autostart_enabled("apply")
         a_auto = menu.addAction("Don't apply at login" if auto_on else "★ Apply at login")
         a_over = menu.addAction("Overwrite with current look")
         a_ren = menu.addAction("Rename…")
@@ -2297,17 +2411,12 @@ class MainWindow(QMainWindow):
     def _set_autostart(self, name: Optional[str]):
         if name:
             self.settings["autostart_preset"] = name
-            AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
-            launcher = Path.home() / ".local/bin/rgbdeck"
-            exec_cmd = str(launcher) if launcher.exists() else f"{sys.executable} -m rgbdeck"
-            AUTOSTART_FILE.write_text(
-                "[Desktop Entry]\nType=Application\nName=RGB Deck (apply preset)\n"
-                f'Exec={exec_cmd} --apply "{name}"\nX-GNOME-Autostart-Delay=5\n'
-                "Icon=rgbdeck\nTerminal=false\nNoDisplay=true\n"
-            )
         else:
             self.settings.pop("autostart_preset", None)
-            AUTOSTART_FILE.unlink(missing_ok=True)
+        try:
+            set_autostart("apply", ["--apply", name] if name else None)
+        except OSError as e:
+            log.error("could not update the login entry: %s", e)
         save_json(SETTINGS_FILE, self.settings)
         self._refresh_presets()
 
@@ -2349,7 +2458,9 @@ class MainWindow(QMainWindow):
         if not self.client.devices:
             if "can't open" in err or "Permission" in err:
                 self.statusBar().showMessage(
-                    "Found devices but can't access them — install the udev rule (see Help → Troubleshooting)."
+                    "Found devices but can't access them — close the vendor software (see Help → Troubleshooting)."
+                    if IS_WINDOWS
+                    else "Found devices but can't access them — install the udev rule (see Help → Troubleshooting)."
                 )
                 self.hint.setText("Permission problem: " + err)
             else:
@@ -2392,19 +2503,31 @@ class MainWindow(QMainWindow):
 
     def _show_troubleshooting(self):
         rules = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "70-rgbdeck.rules")
+        access = (
+            "<b>Device found but can't be accessed</b><br>Another program is holding it. Quit the vendor software "
+            "(Logitech G HUB, ASUS Armoury Crate / Aura, Glorious Core, Corsair iCUE, Razer Synapse, SteelSeries GG, "
+            "HyperX NGENUITY) including its tray icon, then <b>File → Rescan devices</b>.<br><br>"
+            if IS_WINDOWS
+            else "<b>Device found but can't be accessed</b><br>Install the udev rule once, then unplug/replug:<br>"
+            f"<code>sudo install -m644 {rules} /etc/udev/rules.d/ &amp;&amp; sudo udevadm control --reload "
+            "&amp;&amp; sudo udevadm trigger</code><br><br>"
+        )
+        typing = (
+            "<b>Typing effects don't react</b><br>They use a global keyboard hook; some anti-cheat or security "
+            "software blocks those while a game runs.<br><br>"
+            if IS_WINDOWS
+            else "<b>Typing effects don't react</b><br>They read /dev/input; your user needs access (logind grants it to "
+            "the active session). Check the hint under the effect chips.<br><br>"
+        )
         QMessageBox.information(
             self,
             "Troubleshooting",
-            "<b>Device found but can't be accessed</b><br>Install the udev rule once, then unplug/replug:<br>"
-            f"<code>sudo install -m644 {rules} /etc/udev/rules.d/ &amp;&amp; sudo udevadm control --reload "
-            "&amp;&amp; sudo udevadm trigger</code><br><br>"
-            "<b>Device not listed</b><br>Only families with a driver are detected (see the README table). "
+            access + "<b>Device not listed</b><br>Only families with a driver are detected (see the README table). "
             "Another program talking to the device (vendor software, OpenRGB…) must be closed first.<br><br>"
             "<b>Colors don't change on a Glorious mouse</b><br>Its lighting is stored per onboard profile; "
             "RGB Deck writes all three, so this should not happen — if it does, press the profile button once.<br><br>"
-            "<b>Typing effects don't react</b><br>They read /dev/input; your user needs access (logind grants it to "
-            "the active session). Check the hint under the effect chips.<br><br>"
-            f"<b>Logs</b><br>{LOG_FILE} (run <code>rgbdeck --verbose</code> for more detail).",
+            + typing
+            + f"<b>Logs</b><br>{LOG_FILE} (run <code>rgbdeck --verbose</code> for more detail).",
         )
 
     def _show_about(self):
@@ -2435,14 +2558,13 @@ class MainWindow(QMainWindow):
         )
 
     def _start_control_socket(self):
-        self._ctl = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            self._ctl.bind(CONTROL_SOCKET)
-        except OSError:
+            self._ctl = control_listen()
+        except OSError as e:
+            log.warning("control channel unavailable: %s", e)
             self._ctl = None
+        if self._ctl is None:
             return
-        self._ctl.listen(4)
-        self._ctl.setblocking(False)
         self._ctl_notifier = QSocketNotifier(self._ctl.fileno(), QSocketNotifier.Read, self)
         self._ctl_notifier.activated.connect(self._control_request)
 
@@ -2453,7 +2575,18 @@ class MainWindow(QMainWindow):
             return
         try:
             conn.settimeout(1.0)
-            line = conn.recv(4096).decode(errors="replace").strip()
+            data = b""
+            while b"\n" not in data and len(data) < 4096:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            line = data.decode(errors="replace").strip()
+            if IS_WINDOWS:
+                token, _, line = line.partition(" ")
+                if token != CONTROL_TOKEN:
+                    conn.sendall(b"denied")
+                    return
             cmd, _, arg = line.partition(" ")
             if cmd == "apply":
                 if arg in self.presets:
@@ -2601,6 +2734,32 @@ def run_headless_effect(client: LocalBackend, snap: dict) -> int:
         return 0
 
 
+def app_icon_path() -> Optional[Path]:
+    data = Path(__file__).resolve().parent / "data"
+    for name in ("rgbdeck.ico", "rgbdeck.svg") if IS_WINDOWS else ("rgbdeck.svg", "rgbdeck.ico"):
+        if (data / name).exists():
+            return data / name
+    return None
+
+
+def selftest() -> int:
+    """Exit 0 when this installation is complete: every driver imports, Qt starts, the icon is bundled."""
+    setup_logging(True)
+    from rgbdeck.backend import discover_drivers
+
+    mods = discover_drivers()
+    log.info("selftest: %d drivers: %s", len(mods), [m.__name__.rsplit(".", 1)[-1] for m in mods])
+    icon = app_icon_path()
+    log.info("selftest: icon %s", icon)
+    app = QApplication.instance() or QApplication([])
+    pix_ok = icon is not None and not QIcon(str(icon)).pixmap(32, 32).isNull()
+    log.info("selftest: icon renders: %s · platform %s · Qt %s", pix_ok, app.platformName(), QT_VERSION_STR)
+    ok = len(mods) >= 9 and pix_ok
+    log.info("selftest: %s", "OK" if ok else "FAILED")
+    print("selftest", "OK" if ok else "FAILED")
+    return 0 if ok else 1
+
+
 def main(argv: List[str]) -> int:
     if "--apply" in argv:
         name = argv[argv.index("--apply") + 1]
@@ -2625,6 +2784,11 @@ def main(argv: List[str]) -> int:
         for n in sorted(load_json(PRESETS_FILE, {})):
             print(n)
         return 0
+    if "--version" in argv:
+        print(f"{APP_NAME} {__version__}")
+        return 0
+    if "--selftest" in argv:  # CI check of a bundled build: drivers discoverable, Qt + icon load, nothing else
+        return selftest()
 
     if send_control("show") is not None:  # already running: just raise that window
         return 0
@@ -2635,8 +2799,8 @@ def main(argv: List[str]) -> int:
     app.setDesktopFileName("rgbdeck")
     app.setStyle("Fusion")
     app.setStyleSheet(QSS)
-    icon_path = Path(__file__).resolve().parent / "data" / "rgbdeck.svg"
-    if icon_path.exists():
+    icon_path = app_icon_path()
+    if icon_path:
         app.setWindowIcon(QIcon(str(icon_path)))
     client = LocalBackend()
     w = MainWindow(client)

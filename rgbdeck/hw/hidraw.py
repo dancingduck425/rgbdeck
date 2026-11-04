@@ -1,17 +1,25 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Copyright (C) 2026 dancingduck425
-"""Small /dev/hidraw helper: enumeration by VID/PID, output reports, feature reports."""
+"""Small /dev/hidraw helper: enumeration by VID/PID, output reports, feature reports.
+
+This is the Linux backend. On other platforms (or with RGBDECK_HID_BACKEND=hidapi) the names below are
+replaced by rgbdeck.hw.hidapi_backend, which offers the same surface on top of hidapi.
+"""
 
 from __future__ import annotations
 
-import fcntl
 import glob
 import os
-import select
-from dataclasses import dataclass
 from typing import List, Optional
 
+from rgbdeck.hw.hidinfo import HidInfo
 from rgbdeck.models import DeviceError
+
+try:
+    import fcntl
+    import select
+except ImportError:  # Windows
+    fcntl = select = None  # type: ignore[assignment]
 
 # linux/hidraw.h: HIDIOCSFEATURE(len) = _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len)
 _IOC_NRBITS, _IOC_TYPEBITS, _IOC_SIZEBITS = 8, 8, 14
@@ -34,17 +42,7 @@ def HIDIOCGFEATURE(n: int) -> int:
     return _ioc(_IOC_WRITE | _IOC_READ, ord("H"), 0x07, n)
 
 
-@dataclass
-class HidInfo:
-    path: str  # /dev/hidrawN
-    vid: int
-    pid: int
-    name: str
-    interface: int  # USB interface number, -1 if unknown
-    descriptor: bytes
-
-
-def enumerate_hid(vid: Optional[int] = None, pid: Optional[int] = None) -> List[HidInfo]:
+def enumerate_hid(vid: Optional[int] = None, pid: Optional[int] = None, with_descriptors: bool = True) -> List[HidInfo]:
     out = []
     for sysdir in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
         try:
@@ -140,3 +138,9 @@ class HidDevice:
         except OSError as e:
             raise DeviceError(f"feature read from {self.path} failed: {e.strerror}") from e
         return bytes(buf)
+
+
+if fcntl is None or os.environ.get("RGBDECK_HID_BACKEND") == "hidapi":
+    from rgbdeck.hw.hidapi_backend import HidDevice, enumerate_hid  # noqa: F811, F401
+
+__all__ = ["HidInfo", "HidDevice", "enumerate_hid"]

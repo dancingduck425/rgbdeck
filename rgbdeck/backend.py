@@ -29,21 +29,34 @@ log = logging.getLogger("rgbdeck.backend")
 # that exposes probe() is discovered automatically and probed afterwards.
 PREFERRED_DRIVERS = ("logitech_hidpp", "glorious_gmow", "asus_aura_usb")  # verified on real hardware
 KEEPALIVE_INTERVAL = 5.0
+# pkgutil can't list a PyInstaller bundle; this is the fallback (keep in sync with rgbdeck/hw/).
+FROZEN_DRIVER_MODULES = (
+    "logitech_hidpp",
+    "glorious_gmow",
+    "asus_aura_usb",
+    "razer",
+    "logitech_mouse",
+    "corsair_peripheral",
+    "corsair_lighting_node",
+    "steelseries",
+    "hyperx",
+)
 
 
 def discover_drivers():
     """All driver modules under rgbdeck.hw with a probe() function."""
     mods = {}
-    for info in pkgutil.iter_modules(hw_pkg.__path__):
-        if info.name in ("hidraw",) or info.name.endswith("_devices"):
+    names = [i.name for i in pkgutil.iter_modules(hw_pkg.__path__)] or list(FROZEN_DRIVER_MODULES)
+    for name in names:
+        if name in ("hidraw", "hidinfo", "hidapi_backend") or name.endswith("_devices"):
             continue
         try:
-            mod = importlib.import_module(f"rgbdeck.hw.{info.name}")
+            mod = importlib.import_module(f"rgbdeck.hw.{name}")
         except Exception as e:  # noqa: BLE001 - a broken driver must not stop the others
-            log.error("driver module %s failed to import: %s", info.name, e)
+            log.error("driver module %s failed to import: %s", name, e)
             continue
         if callable(getattr(mod, "probe", None)):
-            mods[info.name] = mod
+            mods[name] = mod
     ordered = [mods[n] for n in PREFERRED_DRIVERS if n in mods]
     ordered += [m for n, m in sorted(mods.items()) if n not in PREFERRED_DRIVERS]
     return ordered
@@ -196,7 +209,7 @@ class LocalBackend:
             self._cv.notify_all()
 
     def _fingerprint(self) -> set:
-        return {(i.path, i.vid, i.pid) for i in hidraw.enumerate_hid()}
+        return {(i.path, i.vid, i.pid) for i in hidraw.enumerate_hid(with_descriptors=False)}
 
     def refresh(self):
         """Re-enumerate everything. Devices still present keep their colors/mode state."""

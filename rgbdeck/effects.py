@@ -16,6 +16,7 @@ import os
 import random
 import select
 import struct
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -241,7 +242,9 @@ def _evdev_code_names() -> Dict[int, str]:
 
 
 def find_keyboard_events(name_hint: str = "") -> List[str]:
-    """Event nodes that look like our keyboard (by-id *-event-kbd matching the hint)."""
+    """Event nodes that look like our keyboard (by-id *-event-kbd matching the hint). Windows: the global hook."""
+    if sys.platform == "win32":
+        return ["global keyboard hook"]
     hint = "".join(ch for ch in name_hint.lower() if ch.isalnum())
     found = []
     for p in sorted(glob.glob("/dev/input/by-id/*-event-kbd")):
@@ -251,7 +254,7 @@ def find_keyboard_events(name_hint: str = "") -> List[str]:
     return found
 
 
-class KeyListener(threading.Thread):
+class EvdevKeyListener(threading.Thread):
     """Reads key-down events from evdev nodes; calls on_key(led_name) from the thread."""
 
     def __init__(self, paths: List[str], on_key: Callable[[str], None]):
@@ -297,6 +300,138 @@ class KeyListener(threading.Thread):
 
     def stop(self):
         self._stop.set()
+
+
+# Windows: a low-level keyboard hook. Set-1 scan codes equal Linux key codes for every non-extended key;
+# the E0-prefixed ("extended") keys and the Pause/NumLock pair need a table.
+_WIN_EXTENDED_SCANCODES = {
+    0x1C: 96,  # KP Enter
+    0x1D: 97,  # Right Ctrl
+    0x35: 98,  # KP /
+    0x37: 99,  # Print Screen
+    0x38: 100,  # Right Alt
+    0x47: 102,  # Home
+    0x48: 103,  # Up
+    0x49: 104,  # Page Up
+    0x4B: 105,  # Left
+    0x4D: 106,  # Right
+    0x4F: 107,  # End
+    0x50: 108,  # Down
+    0x51: 109,  # Page Down
+    0x52: 110,  # Insert
+    0x53: 111,  # Delete
+    0x5B: 125,  # Left Win
+    0x5C: 126,  # Right Win
+    0x5D: 127,  # Menu
+}
+_WIN_VK_OVERRIDES = {0x13: 119, 0x90: 69, 0x2C: 99}  # VK_PAUSE, VK_NUMLOCK, VK_SNAPSHOT
+
+
+def win_scancode_to_evdev(scancode: int, extended: bool, vk: int) -> int:
+    """Windows LL-hook (scanCode, LLKHF_EXTENDED, vkCode) -> Linux KEY_* code, 0 if unknown."""
+    if vk in _WIN_VK_OVERRIDES:
+        return _WIN_VK_OVERRIDES[vk]
+    if extended:
+        return _WIN_EXTENDED_SCANCODES.get(scancode & 0xFF, 0)
+    code = scancode & 0xFF
+    return code if 0 < code < 0x80 else 0
+
+
+class WindowsKeyListener(threading.Thread):
+    """WH_KEYBOARD_LL hook in its own message-loop thread; calls on_key(led_name) from that thread."""
+
+    def __init__(self, paths: List[str], on_key: Callable[[str], None]):
+        super().__init__(daemon=True)
+        self.paths = paths or ["global keyboard hook"]
+        self.on_key = on_key
+        self.names = _evdev_code_names()
+        self.ok = False
+        self.error = ""
+        self._tid = 0
+        self._ready = threading.Event()
+        self._stopped = False
+
+    def run(self):
+        try:
+            import ctypes
+            import ctypes.wintypes as wt
+        except ImportError as e:  # not Windows
+            self.error = str(e)
+            self._ready.set()
+            return
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN, WM_KEYUP, WM_SYSKEYUP = 13, 0x100, 0x104, 0x101, 0x105
+        LLKHF_EXTENDED = 0x01
+
+        class KBDLLHOOKSTRUCT(ctypes.Structure):
+            _fields_ = [
+                ("vkCode", wt.DWORD),
+                ("scanCode", wt.DWORD),
+                ("flags", wt.DWORD),
+                ("time", wt.DWORD),
+                ("dwExtraInfo", ctypes.c_void_p),
+            ]
+
+        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t)
+        user32.SetWindowsHookExW.argtypes = (ctypes.c_int, HOOKPROC, ctypes.c_void_p, wt.DWORD)
+        user32.SetWindowsHookExW.restype = ctypes.c_void_p
+        user32.CallNextHookEx.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t)
+        user32.CallNextHookEx.restype = ctypes.c_ssize_t
+        user32.UnhookWindowsHookEx.argtypes = (ctypes.c_void_p,)
+        user32.GetMessageW.argtypes = (ctypes.POINTER(wt.MSG), ctypes.c_void_p, wt.UINT, wt.UINT)
+        user32.PostThreadMessageW.argtypes = (wt.DWORD, wt.UINT, ctypes.c_size_t, ctypes.c_ssize_t)
+        kernel32.GetCurrentThreadId.restype = wt.DWORD
+        down = set()
+
+        def proc(n_code, w_param, l_param):
+            if n_code >= 0:
+                kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                if w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                    if kb.vkCode not in down:  # auto-repeat arrives as more key-downs
+                        down.add(kb.vkCode)
+                        code = win_scancode_to_evdev(kb.scanCode, bool(kb.flags & LLKHF_EXTENDED), kb.vkCode)
+                        led = KEYMAP.get(self.names.get(code) or "")
+                        if led:
+                            try:
+                                self.on_key(ALIASES.get(led, led))
+                            except Exception:
+                                pass
+                elif w_param in (WM_KEYUP, WM_SYSKEYUP):
+                    down.discard(kb.vkCode)
+            return user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+        self._proc = HOOKPROC(proc)  # keep a reference: the hook must outlive this frame
+        hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._proc, None, 0)
+        self._tid = kernel32.GetCurrentThreadId()
+        if not hook:
+            self.error = f"SetWindowsHookEx failed (error {ctypes.get_last_error()})"
+            self._ready.set()
+            return
+        self.ok = True
+        self._ready.set()
+        try:
+            msg = wt.MSG()
+            while not self._stopped and user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+        finally:
+            user32.UnhookWindowsHookEx(hook)
+            self.ok = False
+
+    def stop(self):
+        self._stopped = True
+        self._ready.wait(2.0)
+        if self._tid:
+            try:
+                import ctypes
+
+                ctypes.WinDLL("user32").PostThreadMessageW(self._tid, 0x12, 0, 0)  # WM_QUIT
+            except Exception:
+                pass
+
+
+KeyListener = WindowsKeyListener if sys.platform == "win32" else EvdevKeyListener
 
 
 @dataclass

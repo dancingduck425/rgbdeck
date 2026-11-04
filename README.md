@@ -4,7 +4,7 @@
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-green)
 
-Standalone RGB lighting control for Linux. Talks to your devices **directly over `/dev/hidraw`** with its
+Standalone RGB lighting control for Linux and Windows. Talks to your devices **directly over HID** with its
 own drivers — no vendor software, no background daemon, no third-party RGB software.
 
 - **Per-key painting** on a drawn keyboard, selection tools, gradients, rainbow, dim.
@@ -39,6 +39,8 @@ open a device-support issue with your `lsusb` line.
 
 ## Install
 
+### Linux
+
 ```sh
 git clone https://github.com/dancingduck425/rgbdeck.git ~/src/rgbdeck && cd ~/src/rgbdeck
 ./install.sh            # user install; asks sudo once for the udev rule
@@ -52,6 +54,22 @@ Device access: `70-rgbdeck.rules` (generated from every driver's USB ID list by 
 (or reboot) after installing the rule. Typing effects read `/dev/input/event*`, which logind already
 grants to the active seat.
 
+### Windows
+
+Download **`RGBDeck-Setup-<version>.exe`** from the [latest release](https://github.com/dancingduck425/rgbdeck/releases/latest)
+and run it (there is also a portable `RGBDeck.exe` that needs no install). Nothing else to set up: Windows
+talks to the devices through [hidapi](https://github.com/libusb/hidapi), no driver or rule needed.
+
+- The build is not code-signed, so SmartScreen warns the first time: *More info → Run anyway*.
+- **Quit the vendor software first** (Logitech G HUB, ASUS Armoury Crate, Glorious Core, Corsair iCUE,
+  Razer Synapse, SteelSeries GG, HyperX NGENUITY) — including its tray icon. It keeps the device open, and
+  Windows lets only one program talk to it.
+- From source instead: `pip install .` (pulls PySide6 and hidapi), then `python -m rgbdeck`.
+
+Windows support is new in 1.2.0. It runs exactly the same drivers, and the build is unit-tested and
+smoke-tested on CI, but the three verified devices were verified on Linux. If you try it, please open an
+issue saying what worked.
+
 ## Run
 
 ```sh
@@ -59,6 +77,7 @@ rgbdeck                      # GUI (second launch just raises the window)
 rgbdeck --apply "My look"    # apply a preset headless (used by "apply at login")
 rgbdeck --list               # list presets
 rgbdeck --verbose            # log to the terminal; log file is ~/.config/rgbdeck/rgbdeck.log
+                             #   (Windows: %APPDATA%\rgbdeck\rgbdeck.log)
 ```
 
 Don't run another RGB control program (vendor software etc.) at the same time — two programs talking to
@@ -69,6 +88,7 @@ the same keyboard confuse each other.
 | Symptom | Fix |
 |---|---|
 | "Found devices but can't access them" | Install the udev rule once, then unplug/replug: `sudo install -m644 rgbdeck/data/70-rgbdeck.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger` |
+| Windows: "can't access" / nothing changes | Another program owns the device. Quit the vendor software (G HUB, Armoury Crate, Glorious Core, iCUE, Synapse…) including its tray icon, then **File → Rescan devices**. |
 | Device not listed | Only families in the table above are detected. Close any other program that talks to the device (vendor software, OpenRGB…) — two controllers confuse the hardware. Then **File → Rescan devices**. |
 | Glorious mouse ignores colors | Its lighting is stored per onboard profile (1–3) and most tools only write profile 1. RGB Deck writes all three; if it still ignores you, press the profile button once. While on its cable the mouse still shows your colors — a solid color after charging is just the profile it is on. |
 | Typing effects don't react | They read `/dev/input/event*`. logind grants that to the active session; otherwise add your user to the `input` group. The hint under the effect chips says which input devices are being listened to. |

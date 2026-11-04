@@ -46,3 +46,11 @@ ruff check rgbdeck tests
 
 Open an issue with: `lsusb` output for the device, what the device shows vs. what you set, and the last
 lines of `~/.config/rgbdeck/rgbdeck.log` (run `rgbdeck --verbose` to get more detail).
+
+## Windows
+
+Drivers are platform-neutral: they only use `HidDevice` / `enumerate_hid` from `rgbdeck.hw.hidraw`, which on
+Windows resolves to `rgbdeck.hw.hidapi_backend` (hidapi, with collections regrouped per USB interface). Keep
+interface selection based on `info.interface` and descriptor sniffing (`b"\x06\x43\xff"` for usage page
+0xFF43 etc.) and it will work on both. The Windows build (`RGBDeck.exe` + installer) is produced by the
+`windows` CI job; `python -m rgbdeck --selftest` is what it checks.

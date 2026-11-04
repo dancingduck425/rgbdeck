@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 jobs:
@@ -23,8 +24,8 @@ jobs:
           python -m pip install ruff .
       - name: Lint & format
         run: |
-          ruff check rgbdeck tests tools
-          ruff format --check rgbdeck tests tools
+          ruff check rgbdeck tests tools packaging
+          ruff format --check rgbdeck tests tools packaging
       - name: Byte-compile & import
         env:
           QT_QPA_PLATFORM: offscreen
@@ -36,3 +37,57 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           for t in tests/unit*.py; do echo "== $t"; python "$t" || exit 1; done
+
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pyinstaller
+      - name: Unit tests (no hardware)
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          for t in tests/unit*.py; do echo "== $t"; python "$t" || exit 1; done
+      - name: Version
+        id: ver
+        shell: bash
+        run: echo "version=$(python -c 'import rgbdeck; print(rgbdeck.__version__)')" >> "$GITHUB_OUTPUT"
+      - name: Build RGBDeck.exe
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed --name RGBDeck
+          --icon rgbdeck/data/rgbdeck.ico --add-data "rgbdeck/data;rgbdeck/data"
+          --collect-submodules rgbdeck packaging/windows/launcher.py
+      - name: Smoke-test the exe
+        shell: bash
+        run: |
+          rm -rf "$APPDATA/rgbdeck"
+          ./dist/RGBDeck.exe --selftest
+          rc=$?
+          echo "--- log"; cat "$APPDATA/rgbdeck/rgbdeck.log"
+          grep -q "selftest: OK" "$APPDATA/rgbdeck/rgbdeck.log" && [ "$rc" = 0 ]
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} packaging\windows\rgbdeck.iss
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RGBDeck-windows-${{ steps.ver.outputs.version }}
+          path: |
+            dist/RGBDeck.exe
+            dist/RGBDeck-Setup-*.exe
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" dist/RGBDeck.exe dist/RGBDeck-Setup-*.exe --clobber

@@ -4,20 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rgbdeck"
-version = "1.1.1"
+version = "1.2.0"
 description = "Standalone RGB lighting control for keyboards, mice and motherboards (own drivers, direct hidraw)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "GPL-2.0-only" }
 authors = [{ name = "dancingduck425" }]
-keywords = ["rgb", "lighting", "logitech", "glorious", "asus aura", "hidraw", "linux"]
+keywords = ["rgb", "lighting", "logitech", "glorious", "asus aura", "hidraw", "hidapi", "linux", "windows"]
 classifiers = [
     "Environment :: X11 Applications :: Qt",
+    "Environment :: Win32 (MS Windows)",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Topic :: System :: Hardware",
 ]
-dependencies = ["PySide6>=6.5"]
+dependencies = ["PySide6>=6.5", "hidapi>=0.14; sys_platform != 'linux'"]
 
 [project.optional-dependencies]
 evdev = ["evdev>=1.6"]        # only adds extra key-code names; the common keys are built in

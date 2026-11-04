@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0 — 2026-11-04
+
+- **Windows support.** The same drivers run on top of hidapi: Windows exposes every HID collection as its own
+  device, so the backend regroups them per USB interface, routes each report ID to the collection that owns it
+  (the Logitech 0x11 / 0x12 split) and merges their input reports. No driver or udev rule is needed; the vendor
+  software must be closed. Typing effects use a low-level keyboard hook. Login entries use the Run registry key,
+  settings live in `%APPDATA%\rgbdeck`, single instance via a loopback port with a per-user token.
+- Windows CI job: unit tests, a PyInstaller `RGBDeck.exe`, an Inno Setup installer, both attached to releases.
+- `--selftest` flag (used by CI to check a bundled build), `.ico` app icon.
+
 ## 1.1.1 — 2026-11-04
 
 - udev rule now covers the verified Logitech keyboard, Glorious mouse and ASUS Aura IDs too (they were missing,
