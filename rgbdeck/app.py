@@ -131,11 +131,12 @@ LAST_LOOK = "Last look"  # preset written on close so a per-key layout comes bac
 # TCP port, published with a random token in CONTROL_FILE so only this user's processes can drive it.
 CONTROL_SOCKET = "\0rgbdeck-" + (str(os.getuid()) if hasattr(os, "getuid") else os.environ.get("USERNAME", ""))
 CONTROL_TOKEN = ""
+TCP_CONTROL = not hasattr(socket, "AF_UNIX")  # Windows: loopback TCP + token instead of a unix socket
 
 
 def _control_connect() -> socket.socket:
     """Connect to the running instance's control channel (OSError / ValueError if there is none)."""
-    if IS_WINDOWS:
+    if TCP_CONTROL:
         info = json.loads(CONTROL_FILE.read_text())
         sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sk.settimeout(3.0)
@@ -161,7 +162,7 @@ def send_control(cmd: str) -> Optional[str]:
 def control_listen() -> Optional[socket.socket]:
     """Bind the control channel for this instance; None if another instance already owns it."""
     global CONTROL_TOKEN
-    if IS_WINDOWS:
+    if TCP_CONTROL:
         if send_control("ping") == "pong":
             return None
         sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -2591,7 +2592,7 @@ class MainWindow(QMainWindow):
                     break
                 data += chunk
             line = data.decode(errors="replace").strip()
-            if IS_WINDOWS:
+            if TCP_CONTROL:
                 token, _, line = line.partition(" ")
                 if token != CONTROL_TOKEN:
                     conn.sendall(b"denied")
