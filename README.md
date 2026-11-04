@@ -68,7 +68,7 @@ the same keyboard confuse each other.
 
 | Symptom | Fix |
 |---|---|
-| "Found devices but can't access them" | Install the udev rule once, then unplug/replug: `sudo cp rgbdeck/data/70-rgbdeck.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger` |
+| "Found devices but can't access them" | Install the udev rule once, then unplug/replug: `sudo install -m644 rgbdeck/data/70-rgbdeck.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger` |
 | Device not listed | Only families in the table above are detected. Close any other program that talks to the device (vendor software, OpenRGB…) — two controllers confuse the hardware. Then **File → Rescan devices**. |
 | Glorious mouse ignores colors | Its lighting is stored per onboard profile (1–3) and most tools only write profile 1. RGB Deck writes all three; if it still ignores you, press the profile button once. While on its cable the mouse still shows your colors — a solid color after charging is just the profile it is on. |
 | Typing effects don't react | They read `/dev/input/event*`. logind grants that to the active session; otherwise add your user to the `input` group. The hint under the effect chips says which input devices are being listened to. |
@@ -91,9 +91,12 @@ python3 tests/effect_test.py /tmp/out
 
 ## License
 
-GPL-2.0-only (the device protocols were learned from GPL-2.0 driver sources, so the same license applies here).
+Copyright (C) 2026 dancingduck425. Released under the GPL-2.0-only (see [LICENSE](LICENSE)).
+
+The experimental drivers are ports of OpenRGB's GPL-2.0-or-later controllers, so they remain under the
+GPL; each ported module names the OpenRGB source files it came from.
 
 ## Protocol credits
 
 Device protocols were learned from the driver sources of [OpenRGB](https://gitlab.com/CalcProgrammer1/OpenRGB)
-(GPL-2.0) and [korkje/mxw](https://github.com/korkje/mxw). RGB Deck does not use or depend on either at runtime.
+(GPL-2.0-or-later) and [korkje/mxw](https://github.com/korkje/mxw) (MIT). RGB Deck does not use or depend on either at runtime.

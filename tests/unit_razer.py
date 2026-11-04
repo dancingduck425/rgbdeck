@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """Hardware-free checks for rgbdeck.hw.razer: packets are built through the driver with a fake HidDevice and
 compared byte-for-byte against what OpenRGB's RazerController.cpp would send."""
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """Hardware-free checks: effect engine, keyboard geometry, color panel state, packet encoders."""
 
 import os

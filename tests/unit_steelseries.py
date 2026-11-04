@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """Hardware-free checks for rgbdeck.hw.steelseries: a fake HidDevice records every write / feature report
 and we assert the exact bytes OpenRGB's C++ would have produced."""
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """
 Software (app-driven) keyboard effects: reactive key glow and ripples.
 

@@ -25,11 +25,11 @@ EOF
 
 install_udev() {
     if [ -w /etc/udev/rules.d ]; then
-        cp "$HERE/rgbdeck/data/70-rgbdeck.rules" /etc/udev/rules.d/
+        install -m644 "$HERE/rgbdeck/data/70-rgbdeck.rules" /etc/udev/rules.d/70-rgbdeck.rules
         udevadm control --reload && udevadm trigger
     else
         echo "Installing the udev rule (device permissions) — sudo needed:"
-        sudo cp "$HERE/rgbdeck/data/70-rgbdeck.rules" /etc/udev/rules.d/ &&
+        sudo install -m644 "$HERE/rgbdeck/data/70-rgbdeck.rules" /etc/udev/rules.d/70-rgbdeck.rules &&
         sudo udevadm control --reload && sudo udevadm trigger || echo "  (skipped; devices may need root until the rule is installed)"
     fi
 }

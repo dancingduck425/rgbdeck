@@ -1,10 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
+# Packet formats derived from OpenRGB (https://gitlab.com/CalcProgrammer1/OpenRGB),
+# Copyright (C) the OpenRGB contributors, GPL-2.0-or-later.
 """HyperX (Kingston / HP) USB HID keyboards, mice, mousemats and microphones over /dev/hidraw.
 
 EXPERIMENTAL: ported from OpenRGB sources, not yet verified on hardware.
 
-Every packet in this module is a byte-for-byte port of the GPL-2.0 OpenRGB C++ controllers (local checkout
-OpenRGB Controllers/...); the originating file is cited next to each packet builder. Nothing here
-talks to OpenRGB at runtime.
+Every packet in this module is a byte-for-byte port of the GPL-2.0 OpenRGB C++ controllers
+(Controllers/...); the originating file is cited next to each packet builder. Nothing here talks to OpenRGB
+at runtime.
 
 Supported devices (VID:PID, USB interface OpenRGB opens on Linux):
 

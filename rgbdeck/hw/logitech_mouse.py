@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
+# Packet formats derived from OpenRGB (https://gitlab.com/CalcProgrammer1/OpenRGB),
+# Copyright (C) the OpenRGB contributors, GPL-2.0-or-later.
 """
 Logitech HID++ 2.0 RGB mice, mousemats and headsets — wired, or through Lightspeed / Unifying receivers.
 

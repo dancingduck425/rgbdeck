@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """
 Physical key geometry for drawing a keyboard from its LED names.
 

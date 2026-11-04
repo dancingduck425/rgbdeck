@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """Hardware-free checks for the Corsair drivers: a fake HidDevice records every write, tests assert exact bytes."""
 
 import os

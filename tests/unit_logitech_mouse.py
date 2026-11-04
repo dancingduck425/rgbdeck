@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """Hardware-free checks for rgbdeck.hw.logitech_mouse: exact HID++ bytes against a scripted fake hidraw device.
 
 Covers: root GetFeature, the 0x8071 SetSWControl claim sequence (with one BUSY retry), a 0x8071 Direct/static color

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1 — 2026-11-04
+
+- udev rule now covers the verified Logitech keyboard, Glorious mouse and ASUS Aura IDs too (they were missing,
+  so those devices only worked where another package's rule granted access). 433 IDs.
+- Installer writes the rule with mode 644 regardless of the caller's umask (udev ignores unreadable rules).
+- SPDX license and copyright headers on every source file; ported drivers credit their OpenRGB origin.
+- Removed local filesystem paths from two driver docstrings.
+
 ## 1.1.0 — 2026-11-04
 
 - New native driver families, ported byte-for-byte from GPL-2.0 driver sources with packet-level unit tests

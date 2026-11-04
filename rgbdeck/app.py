@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """RGB Deck - standalone lighting control for your keyboard, mouse and motherboard (direct hidraw)."""
 
 from __future__ import annotations
@@ -2389,11 +2391,12 @@ class MainWindow(QMainWindow):
             self._fx_timer.setInterval(int(1000 / max(10, self.engine.settings.fps)))
 
     def _show_troubleshooting(self):
+        rules = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "70-rgbdeck.rules")
         QMessageBox.information(
             self,
             "Troubleshooting",
             "<b>Device found but can't be accessed</b><br>Install the udev rule once, then unplug/replug:<br>"
-            "<code>sudo cp rgbdeck/data/70-rgbdeck.rules /etc/udev/rules.d/ &amp;&amp; sudo udevadm control --reload "
+            f"<code>sudo install -m644 {rules} /etc/udev/rules.d/ &amp;&amp; sudo udevadm control --reload "
             "&amp;&amp; sudo udevadm trigger</code><br><br>"
             "<b>Device not listed</b><br>Only families with a driver are detected (see the README table). "
             "Another program talking to the device (vendor software, OpenRGB…) must be closed first.<br><br>"

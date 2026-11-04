@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """Drive MainWindow offscreen against the real devices (standalone backend) and check hardware state."""
 
 import os

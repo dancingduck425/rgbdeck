@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
+# Packet formats learned from korkje/mxw (https://github.com/korkje/mxw, MIT) and OpenRGB
+# (https://gitlab.com/CalcProgrammer1/OpenRGB, GPL-2.0-or-later).
 """Glorious Model O / D Wireless (Sinowealth) mouse driver: feature reports on the vendor interface."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """Device model shared by the UI and the hardware drivers."""
 
 from __future__ import annotations

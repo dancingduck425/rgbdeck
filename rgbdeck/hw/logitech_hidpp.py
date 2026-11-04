@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """
 Logitech HID++ 2.0 RGB keyboard driver — generic.
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """Hardware-free checks for rgbdeck.hw.hyperx: exact packet bytes against the OpenRGB C++ the driver was ported
 from. No /dev/hidraw is touched - a fake HidDevice records every feature report / output report."""
 

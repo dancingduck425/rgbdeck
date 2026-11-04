@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
+# Packet formats derived from OpenRGB (https://gitlab.com/CalcProgrammer1/OpenRGB),
+# Copyright (C) the OpenRGB contributors, GPL-2.0-or-later.
 """
 SteelSeries mice, keyboards, headsets and mousemats — direct /dev/hidraw drivers.
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 dancingduck425
 """Small /dev/hidraw helper: enumeration by VID/PID, output reports, feature reports."""
 
 from __future__ import annotations
