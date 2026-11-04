@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.2 — 2026-11-04
+
+- **Windows: the 1.2.0 / 1.2.1 builds could not talk to any device.** The hidapi module is loaded dynamically,
+  so PyInstaller never bundled it and every scan failed; `RGBDeck.exe` now ships it and `--selftest` fails
+  the build if the HID backend is unusable.
+- Windows: collections of one USB interface were not regrouped (each also carries its own instance-id suffix,
+  `col02` ↔ `&0&0001`), which would have left Logitech keyboards undetected.
+
 ## 1.2.1 — 2026-11-04
 
 - **Keep my look when I close RGB Deck** (Settings, on by default): on exit, a single color becomes a saved

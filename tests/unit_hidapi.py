@@ -28,13 +28,14 @@ def desc(page, usage, rid=None, size=19):
     return d
 
 
-KB = r"\\?\hid#vid_046d&pid_c33c&mi_01&col0%d#7&2b4c1234&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}"
+# Real Windows shape: collection N is "colNN" in the hardware id AND "&000(N-1)" at the end of the instance id
+KB = r"\\?\hid#vid_046d&pid_c33c&mi_01&col0%d#7&2b4c1234&0&000%d#{4d1e55b2-f16f-11cf-88cb-001111000030}"
 MOUSE = r"\\?\hid#vid_258a&pid_2011&mi_02#7&abcd&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}"
 COLS = {
-    KB % 1: dict(page=1, usage=6, rids={1}, desc=desc(1, 6, 1), locked=True),
-    KB % 2: dict(page=0xC, usage=1, rids={2}, desc=desc(0xC, 1, 2), locked=True),
-    KB % 3: dict(page=0xFF43, usage=0x0602, rids={0x11}, desc=desc(0xFF43, 0x0602, 0x11)),
-    KB % 4: dict(page=0xFF43, usage=0x0604, rids={0x12}, desc=desc(0xFF43, 0x0604, 0x12, 63)),
+    KB % (1, 0): dict(page=1, usage=6, rids={1}, desc=desc(1, 6, 1), locked=True),
+    KB % (2, 1): dict(page=0xC, usage=1, rids={2}, desc=desc(0xC, 1, 2), locked=True),
+    KB % (3, 2): dict(page=0xFF43, usage=0x0602, rids={0x11}, desc=desc(0xFF43, 0x0602, 0x11)),
+    KB % (4, 3): dict(page=0xFF43, usage=0x0604, rids={0x12}, desc=desc(0xFF43, 0x0604, 0x12, 63)),
     MOUSE: dict(page=0xFFFF, usage=0, rids=set(), desc=desc(0xFFFF, 0, None, 64)),
 }
 for c in COLS.values():
@@ -130,8 +131,8 @@ dev = hidraw.HidDevice(kb.path)
 check(len(dev._handles) == 2, f"only the two vendor collections were opened ({len(dev._handles)})")
 dev.write(bytes([0x11, 0xFF, 1, 2]) + bytes(16))
 dev.write(bytes([0x12, 0xFF, 3, 4]) + bytes(60))
-check(COLS[KB % 3]["written"] and COLS[KB % 3]["written"][0][0] == 0x11, "0x11 went to usage 0x0602")
-check(COLS[KB % 4]["written"] and COLS[KB % 4]["written"][0][0] == 0x12, "0x12 went to usage 0x0604")
+check(COLS[KB % (3, 2)]["written"] and COLS[KB % (3, 2)]["written"][0][0] == 0x11, "0x11 went to usage 0x0602")
+check(COLS[KB % (4, 3)]["written"] and COLS[KB % (4, 3)]["written"][0][0] == 0x12, "0x12 went to usage 0x0604")
 got = {dev.read(64, 0.5)[0] for _ in range(2)}
 check(got == {0x11, 0x12}, f"replies from both collections merged into one read queue {got}")
 check(dev.read(64, 0.05) is None, "read times out when idle")

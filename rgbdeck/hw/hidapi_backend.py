@@ -38,7 +38,10 @@ try:
 except ImportError as e:
     _hid_error = f"the 'hidapi' Python package is not installed (pip install hidapi): {e}"
 
-_COL_RE = re.compile(r"&col[0-9a-f]+", re.I)
+# \\?\hid#vid_046d&pid_c33c&mi_01&col03#7&2b4c1234&0&0002#{guid}: every collection carries its own index both in
+# the hardware id (col03) and in the last field of the instance id (&0002), so both must go to find the interface.
+_COL_RE = re.compile(r"&col[0-9a-f]+(#[0-9a-f]+&[0-9a-f]+&[0-9a-f]+)&[0-9a-f]+#", re.I)
+_COL_ONLY_RE = re.compile(r"&col[0-9a-f]+", re.I)
 VENDOR_PAGE = 0xFF00  # usage pages >= this are vendor-defined: the collections the drivers talk to
 
 
@@ -49,8 +52,9 @@ def _lib():
 
 
 def _group_key(path: str) -> str:
-    r"""\\?\hid#vid_046d&pid_c33c&mi_01&col03#7&2b4c...#{guid} -> same string without the collection index."""
-    return _COL_RE.sub("", path)
+    r"""\\?\hid#vid_046d&pid_c33c&mi_01&col03#7&2b4c...&0&0002#{guid} -> same string without the collection index."""
+    key, n = _COL_RE.subn(r"\1#", path)
+    return key if n else _COL_ONLY_RE.sub("", path)
 
 
 class _Collection:

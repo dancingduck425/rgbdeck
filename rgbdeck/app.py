@@ -2789,12 +2789,22 @@ def selftest() -> int:
 
     mods = discover_drivers()
     log.info("selftest: %d drivers: %s", len(mods), [m.__name__.rsplit(".", 1)[-1] for m in mods])
+    # the HID library must really be in the build (PyInstaller can't see hidapi_backend's dynamic import)
+    from rgbdeck.hw import hidraw
+
+    try:
+        found = hidraw.enumerate_hid(with_descriptors=False)
+        hid_ok = True
+        log.info("selftest: HID backend %s lists %d interfaces", hidraw.enumerate_hid.__module__, len(found))
+    except DeviceError as e:
+        hid_ok = False
+        log.error("selftest: HID backend unusable: %s", e)
     icon = app_icon_path()
     log.info("selftest: icon %s", icon)
     app = QApplication.instance() or QApplication([])
     pix_ok = icon is not None and not QIcon(str(icon)).pixmap(32, 32).isNull()
     log.info("selftest: icon renders: %s · platform %s · Qt %s", pix_ok, app.platformName(), QT_VERSION_STR)
-    ok = len(mods) >= 9 and pix_ok
+    ok = len(mods) >= 9 and pix_ok and hid_ok
     log.info("selftest: %s", "OK" if ok else "FAILED")
     print("selftest", "OK" if ok else "FAILED")
     return 0 if ok else 1
