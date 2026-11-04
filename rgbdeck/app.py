@@ -126,6 +126,7 @@ AUTOSTART_FILE = _config_root() / "autostart" / "rgbdeck-apply.desktop"  # Linux
 CONTROL_FILE = CONFIG_DIR / "control.json"  # Windows: port + token of the running instance
 
 ACCENT = "#7c6cff"
+LAST_LOOK = "Last look"  # preset written on close so a per-key layout comes back at login
 # One running instance per user. Linux: an abstract unix socket. Windows (no AF_UNIX in Python): a loopback
 # TCP port, published with a random token in CONTROL_FILE so only this user's processes can drive it.
 CONTROL_SOCKET = "\0rgbdeck-" + (str(os.getuid()) if hasattr(os, "getuid") else os.environ.get("USERNAME", ""))
@@ -1475,6 +1476,13 @@ class SettingsDialog(QDialog):
         self.tray_start = QCheckBox("Start RGB Deck minimized in the tray when I log in")
         self.tray_start.setChecked(autostart_enabled("tray"))
         form.addRow("Login", self.tray_start)
+        self.keep = QCheckBox("Keep my look when I close RGB Deck")
+        self.keep.setChecked(settings.get("keep_on_close", True))
+        self.keep.setToolTip(
+            "On close, store the current colors / effect in each device's own memory so they survive a reboot.\n"
+            "Multi-color key layouts can't be stored in the keyboard; those are re-applied at login instead."
+        )
+        form.addRow("Closing", self.keep)
         self.fps = QSpinBox()
         self.fps.setRange(10, 40)
         self.fps.setValue(int(settings.get("fx_fps", 24)))
@@ -1491,6 +1499,7 @@ class SettingsDialog(QDialog):
     def apply(self) -> dict:
         self.settings["sync"] = self.sync.isChecked()
         self.settings["fx_fps"] = self.fps.value()
+        self.settings["keep_on_close"] = self.keep.isChecked()
         try:
             set_autostart("tray", ["--tray"] if self.tray_start.isChecked() else None)
         except OSError as e:
@@ -2658,8 +2667,38 @@ class MainWindow(QMainWindow):
             return
         self._stop_app_effect()
         self.tray.hide()
-        self.client.wait_idle(2.0)
+        self._keep_look_on_close()
+        self.client.wait_idle(4.0)
         super().closeEvent(e)
+
+    def _keep_look_on_close(self):
+        """Make the current look outlive the app: store it in each device's memory where the hardware can, and
+        re-apply what it can't (multi-color key layouts) at login through the 'Last look' preset."""
+        if not self.settings.get("keep_on_close", True) or not self.client.devices:
+            return
+        needs_login = False
+        for d in self.client.devices:
+            mode = d.current_mode
+            try:
+                if mode.has_per_led:
+                    keys = [c for c, n in zip(d.colors, d.led_names) if "Indicator" not in n] or list(d.colors)
+                    static = d.mode_named("Static")
+                    if keys and len(set(keys)) == 1 and static is not None and static.has_mode_colors:
+                        static.colors = [keys[0]]
+                        self.client.update_mode(d, static, save=True)  # one color: the device can remember it
+                        log.info("kept %s as static %06x in device memory", d.name, keys[0])
+                    else:
+                        needs_login = True  # per-key layout: only the app can restore it
+                else:
+                    self.client.update_mode(d, mode, save=True)  # onboard effect: just ask the device to keep it
+                    log.info("kept %s effect '%s' in device memory", d.name, mode.name)
+            except DeviceError as e:
+                log.warning("could not store the look in %s: %s", d.name, e)
+        self.presets[LAST_LOOK] = self._snapshot()
+        save_json(PRESETS_FILE, self.presets)
+        if needs_login and not self.settings.get("autostart_preset"):
+            self._set_autostart(LAST_LOOK)
+            log.info("per-key layout: '%s' will be re-applied at login", LAST_LOOK)
 
 
 # =============================================================================

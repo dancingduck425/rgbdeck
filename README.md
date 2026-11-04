@@ -12,6 +12,9 @@ own drivers — no vendor software, no background daemon, no third-party RGB sof
 - **Typing effects**: ripple & key glow rendered on top of your colors.
 - **Sync all devices**: one click colors keyboard + mouse + motherboard.
 - **Presets**, apply-at-login, tray icon, single instance.
+- **Close it and the colors stay**: on exit the look is stored in each device's own memory (single color or
+  onboard effect), and multi-color key layouts are re-applied at login. The app doesn't need to keep running
+  unless you use a typing effect.
 
 ![RGB Deck](docs/screenshot.png)
 
@@ -94,6 +97,13 @@ the same keyboard confuse each other.
 | Typing effects don't react | They read `/dev/input/event*`. logind grants that to the active session; otherwise add your user to the `input` group. The hint under the effect chips says which input devices are being listened to. |
 | Keyboard flickers / lags while dragging the wheel | Frames are capped per device (Logitech ≈ 20 fps). If another program is also writing to the keyboard, close it. |
 | Something else | `rgbdeck --verbose` prints to the terminal; the log is at `~/.config/rgbdeck/rgbdeck.log`. Open an issue with the log and your `lsusb` line. |
+
+## Resource use
+
+Measured on the author's machine (Plasma, three devices): 0.0 % CPU idle, about 1 % of one core while a
+typing effect is rendering at 24 fps. Unique memory about 45 MB (the larger "RSS" figure in task managers
+is mostly Qt / desktop libraries shared with other apps). `rgbdeck --apply` (what the login entry runs)
+needs no Qt at all, ~20 MB, and exits once the look is applied.
 
 ## Keyboard shortcuts
 

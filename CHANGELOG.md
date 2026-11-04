@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1 — 2026-11-04
+
+- **Keep my look when I close RGB Deck** (Settings, on by default): on exit, a single color becomes a saved
+  Static effect in the device's memory, a running onboard effect is re-sent with the save flag, and a
+  multi-color key layout is written to the "Last look" preset and re-applied at login (the keyboard cannot
+  store per-key colors itself). Verified on the G513: the stored static color survives a USB reset.
+- README documents measured CPU / memory use.
+
 ## 1.2.0 — 2026-11-04
 
 - **Windows support.** The same drivers run on top of hidapi: Windows exposes every HID collection as its own
