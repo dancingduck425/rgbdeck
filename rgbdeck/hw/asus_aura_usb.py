@@ -20,6 +20,7 @@ from rgbdeck.hw.hidraw import HidDevice, enumerate_hid
 
 VID = 0x0B05
 PIDS = {0x19AF, 0x1939, 0x18F3, 0x1867, 0x1872, 0x1889}  # Aura USB mainboard controllers
+USB_IDS = [(VID, pid) for pid in sorted(PIDS)]
 AURA_MODE_DIRECT = 0xFF
 EFFECTS = [
     ("Off", 0),

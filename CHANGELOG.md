@@ -7,7 +7,7 @@
   headsets / Lightspeed & Unifying receivers, Corsair peripherals (legacy + iCUE V2), Corsair Lighting Node /
   Commander PRO, SteelSeries (mice, Apex keyboards, headsets, QcK Prism), HyperX (Alloy keyboards, Pulsefire
   mice, mats, QuadCast).
-- Drivers are auto-discovered from `rgbdeck/hw/`; udev rules generated from their USB ID lists (411 IDs).
+- Drivers are auto-discovered from `rgbdeck/hw/`; udev rules generated from their USB ID lists (433 IDs).
 - Per-driver keepalive heartbeats (boards that fall back to onboard lighting without one).
 - LED-count controls for resizable zones (LED strips / fan hubs), remembered per device.
 - Backend worker unit tests (coalescing, ordering, error isolation, keepalive, hotplug).

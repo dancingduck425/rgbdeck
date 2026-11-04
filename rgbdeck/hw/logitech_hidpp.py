@@ -53,6 +53,7 @@ KNOWN = {
     0xC33A: "Logitech G413",
     0xC54D: "Logitech PRO X 60",
 }
+USB_IDS = [(VID_LOGITECH, pid) for pid in KNOWN]  # udev rules; unknown Logitech boards are still probed
 
 SWID = 0x07
 DEV_IDX = 0xFF

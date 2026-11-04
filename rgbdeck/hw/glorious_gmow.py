@@ -26,6 +26,7 @@ PIDS = {
     0x2012: ("Glorious Model D Wireless", True),
     0x2023: ("Glorious Model D Wireless", False),
 }
+USB_IDS = [(VID, pid) for pid in PIDS]
 PKT = 65
 
 M_OFF, M_RAINBOW, M_CYCLE, M_CBREATH, M_STATIC, M_BREATH, M_TAIL, M_RAVE, M_WAVE = range(9)
