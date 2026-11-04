@@ -1,0 +1,19 @@
+# RGB Deck: let the logged-in user talk to these devices directly.
+# Install:  sudo cp 70-rgbdeck.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+# Logitech G513 / G512 / G810 / G815 / G910 / G915 keyboards
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c33c", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c33e", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c339", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c337", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c33f", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c32b", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c541", TAG+="uaccess"
+# Glorious Model O / D Wireless (cable and dongle)
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="2011", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="2022", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="2012", TAG+="uaccess"
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="2023", TAG+="uaccess"
+# ASUS Aura USB mainboard controller
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="19af", TAG+="uaccess"
+# keyboard key presses for the typing effects (already covered by logind for seat devices, kept for completeness)
+SUBSYSTEM=="input", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c33c", TAG+="uaccess"

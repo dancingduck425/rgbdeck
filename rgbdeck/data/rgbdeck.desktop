@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RGB Deck
+Comment=Per-key lighting control for keyboard, mouse and other OpenRGB devices
+Exec=rgbdeck
+Icon=rgbdeck
+Terminal=false
+Categories=Utility;Settings;HardwareSettings;
+StartupWMClass=rgbdeck
+Keywords=RGB;OpenRGB;keyboard;mouse;lighting;LED;
