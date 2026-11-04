@@ -54,7 +54,10 @@ def _lib():
 def _group_key(path: str) -> str:
     r"""\\?\hid#vid_046d&pid_c33c&mi_01&col03#7&2b4c...&0&0002#{guid} -> same string without the collection index."""
     key, n = _COL_RE.subn(r"\1#", path)
-    return key if n else _COL_ONLY_RE.sub("", path)
+    if n:
+        return key
+    key, n = _COL_ONLY_RE.subn("", path)
+    return re.sub(r"&[0-9a-f]+#\{", "#{", key, flags=re.I) if n else key  # odd instance id: still drop its last field
 
 
 class _Collection:
@@ -111,9 +114,9 @@ def enumerate_hid(vid: Optional[int] = None, pid: Optional[int] = None, with_des
         if with_descriptors:
             seen: Set[bytes] = set()
             for c in cols:
-                # Opening a system keyboard / mouse collection is refused on Windows; the drivers only
-                # care about vendor-defined collections, so only those are read for real.
-                c.descriptor = _read_descriptor(c) if c.page >= VENDOR_PAGE else b""
+                # Windows hands out a system keyboard / mouse collection without read/write access, but
+                # its preparsed data (= the descriptor) and feature reports still work on that handle.
+                c.descriptor = _read_descriptor(c)
                 if c.descriptor:
                     for page, usage, rids in parse_collections(c.descriptor):
                         if (page, usage) == (c.page, c.usage) or len(cols) == 1:
@@ -124,13 +127,17 @@ def enumerate_hid(vid: Optional[int] = None, pid: Optional[int] = None, with_des
             desc = b"".join(sorted(seen, key=len))  # dedupe: hidapi's Linux build returns the whole node each time
         else:
             desc = b""
-        _GROUPS[key] = cols
+        if with_descriptors or key not in _GROUPS:  # a cheap hotplug poll must not drop the known report ids
+            _GROUPS[key] = cols
         out.append(HidInfo(key, v, p, name, iface if iface is not None else -1, desc))
     return out
 
 
 class HidDevice:
-    """One USB interface: every openable vendor collection behind one write/read surface."""
+    """One USB interface: every openable collection behind one write/read surface.
+
+    Vendor collections carry the lighting protocol; a keyboard / mouse collection opens on Windows without
+    read/write access, which is still enough for the feature reports some drivers (Razer ...) send there."""
 
     def __init__(self, path: str):
         self.path = path
@@ -140,11 +147,11 @@ class HidDevice:
             cols = _GROUPS.get(path)
         if not cols:
             raise DeviceError(f"can't open {path}: device vanished")
-        vendor = [c for c in cols if c.page >= VENDOR_PAGE]
         self._handles: List[Tuple[_Collection, object]] = []
         errors = []
         opened: Dict[str, object] = {}  # hidapi's Linux build lists one node per collection: open each node once
-        for c in vendor or cols:
+        # vendor collections first so an unknown report id is tried where it most likely belongs
+        for c in sorted(cols, key=lambda c: c.page < VENDOR_PAGE):
             if c.path in opened:
                 self._handles.append((c, opened[c.path]))
                 continue
@@ -177,14 +184,19 @@ class HidDevice:
 
     # -------------------------------------------------------------- plumbing
     def _reader(self, dev):
+        failures = 0
         while not self._stop.is_set():
             try:
-                buf = dev.read(64, 100)
+                buf = dev.read(1024, 100)  # hidapi copies min(len, report size): never clip a 65-byte report
             except Exception:
                 if self._stop.is_set():
                     return
+                failures += 1
+                if failures >= 3:
+                    return  # a handle without read access (system keyboard / mouse collection on Windows)
                 self._stop.wait(0.1)
                 continue
+            failures = 0
             if buf:
                 self._q.put(bytes(buf))
 
@@ -192,10 +204,8 @@ class HidDevice:
         dev = self._route.get(report_id)
         if dev is not None:
             return [dev]
-        devs = list({id(d): d for _c, d in self._handles}.values())
-        if len(devs) == 1 or report_id == 0:
-            return devs[:1]
-        return devs  # unknown report id: try every collection, remember the winner
+        # unknown report id (or none at all): try every collection, remember the winner
+        return list({id(d): d for _c, d in self._handles}.values())
 
     def _dispatch(self, report_id: int, what: str, fn) -> object:
         last = None

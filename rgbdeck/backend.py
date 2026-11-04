@@ -253,7 +253,7 @@ class LocalBackend:
     def poll_notifications(self) -> bool:
         try:
             return self._fingerprint() != self._seen
-        except OSError:
+        except (OSError, DeviceError):
             return False
 
     def driver_for(self, dev: Device):

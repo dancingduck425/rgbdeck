@@ -1,6 +1,7 @@
 """Hardware-free checks for the hidapi (Windows) backend: per-interface grouping, report-id routing, merged reads,
 and the Windows scan-code mapping. A fake `hid` module imitates Windows: one entry per collection, writes with a
-foreign report id rejected."""
+foreign report id rejected, system keyboard / mouse collections open without read/write access (feature reports
+and the descriptor still work on them)."""
 
 import os
 import sys
@@ -61,14 +62,14 @@ class FakeDev:
         self.col = None
 
     def open_path(self, path):
-        self.col = COLS[path.decode()]
-        if self.col.get("locked"):
-            raise OSError("Access is denied")
+        self.col = COLS[path.decode()]  # Windows: a system collection opens too, just with access 0
 
     def get_report_descriptor(self):
         return list(self.col["desc"])
 
     def write(self, data):
+        if self.col.get("locked"):
+            raise OSError("Access is denied")
         if self.col["rids"] and data[0] not in self.col["rids"]:
             raise OSError("The parameter is incorrect")
         self.col["written"].append(bytes(data))
@@ -76,6 +77,8 @@ class FakeDev:
         return len(data)
 
     def read(self, n, timeout_ms=0):
+        if self.col.get("locked"):
+            raise OSError("Access is denied")
         for _ in range(max(1, timeout_ms // 10)):
             if self.col["replies"]:
                 return list(self.col["replies"].pop(0))
@@ -128,9 +131,13 @@ check(all(i.descriptor == b"" for i in hidraw.enumerate_hid(with_descriptors=Fal
 
 # --- routing
 dev = hidraw.HidDevice(kb.path)
-check(len(dev._handles) == 2, f"only the two vendor collections were opened ({len(dev._handles)})")
+check(len(dev._handles) == 4, f"every collection opened, vendor ones first ({len(dev._handles)})")
+check(dev._handles[0][0].page >= 0xFF00 and dev._handles[1][0].page >= 0xFF00, "vendor collections come first")
 dev.write(bytes([0x11, 0xFF, 1, 2]) + bytes(16))
 dev.write(bytes([0x12, 0xFF, 3, 4]) + bytes(60))
+# the system collections' feature report still works (Razer-style drivers use it), reads/writes there don't
+dev.send_feature(bytes([0x01, 0x05]))
+check(COLS[KB % (1, 0)]["feats"] == [bytes([0x01, 0x05])], "feature report routed to the keyboard collection")
 check(COLS[KB % (3, 2)]["written"] and COLS[KB % (3, 2)]["written"][0][0] == 0x11, "0x11 went to usage 0x0602")
 check(COLS[KB % (4, 3)]["written"] and COLS[KB % (4, 3)]["written"][0][0] == 0x12, "0x12 went to usage 0x0604")
 got = {dev.read(64, 0.5)[0] for _ in range(2)}
@@ -145,8 +152,17 @@ try:
     check(False, "unknown report id raises")
 except Exception as e:
     check("failed" in str(e), f"unknown report id raises DeviceError ({e})")
+time.sleep(0.5)
+check(sum(t.is_alive() for t in dev._threads) == 2, "readers on the access-0 handles gave up, vendor ones run")
 dev.close()
 check(all(not t.is_alive() for t in dev._threads), "reader threads stopped on close")
+# path grouping fallbacks
+from rgbdeck.hw.hidapi_backend import _group_key as gk  # noqa: E402
+
+check(gk(KB % (1, 0)) == gk(KB % (4, 3)), "col01/&0000 and col04/&0003 share a key")
+odd = r"\\?\hid#vid_1&pid_2&col02#9&abc&0&0001#{guid}"
+check(gk(odd) == r"\\?\hid#vid_1&pid_2#9&abc&0#{guid}", f"odd instance id still loses its last field ({gk(odd)})")
+check(gk(MOUSE) == MOUSE, "a path without collections is its own key")
 
 # --- feature reports on a collection without report ids (Glorious)
 m = hidraw.enumerate_hid(0x258A)[0]
@@ -167,6 +183,11 @@ check(EVDEV_CODES[win_scancode_to_evdev(0x45, False, 0x13)] == "KEY_PAUSE", "Pau
 check(EVDEV_CODES[win_scancode_to_evdev(0x45, True, 0x90)] == "KEY_NUMLOCK", "Num Lock")
 check(EVDEV_CODES[win_scancode_to_evdev(0x1C, True, 0x0D)] == "KEY_KPENTER", "KP Enter")
 check(EVDEV_CODES[win_scancode_to_evdev(0x5B, True, 0x5B)] == "KEY_LEFTMETA", "Left Win")
+check(EVDEV_CODES[win_scancode_to_evdev(0x58, False, 0x7B)] == "KEY_F12", "F12")
+check(EVDEV_CODES[win_scancode_to_evdev(0x64, False, 0x7C)] == "KEY_F13", "F13 (not Right Alt)")
+check(EVDEV_CODES[win_scancode_to_evdev(0x6F, False, 0x87)] == "KEY_F24", "F24")
+check(EVDEV_CODES[win_scancode_to_evdev(0x7D, False, 0xDC)] == "KEY_YEN", "JIS Yen (not Left Win)")
+check(EVDEV_CODES[win_scancode_to_evdev(0x56, False, 0xE2)] == "KEY_102ND", "ISO <> key")
 check(win_scancode_to_evdev(0x00, False, 0xFF) == 0, "unknown -> 0")
 
 print("\nALL PASSED" if not fails else "\nFAILURES: " + str(fails))

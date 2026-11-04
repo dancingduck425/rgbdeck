@@ -163,6 +163,38 @@ check(
     "setting off -> devices and login entry untouched",
 )
 
+# Windows control channel: a stale control.json pointing at some other program's port must not look like a
+# running RGB Deck (that would make the next start exit silently)
+import json  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+
+srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+srv.bind(("127.0.0.1", 0))
+srv.listen(1)
+
+
+def _stranger():
+    c, _ = srv.accept()
+    c.recv(4096)
+    c.sendall(b"220 something else entirely\r\n")
+    c.close()
+
+
+threading.Thread(target=_stranger, daemon=True).start()
+app_mod.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+app_mod.CONTROL_FILE.write_text(json.dumps({"port": srv.getsockname()[1], "token": "x"}))
+app_mod.TCP_CONTROL = True
+check(app_mod.send_control("show") is None, "foreign reply on a stale control port is not 'running'")
+srv.close()
+check(app_mod.send_control("show") is None, "dead control port is not 'running'")
+ctl = app_mod.control_listen()
+check(ctl is not None and app_mod.CONTROL_FILE.exists(), "listener bound and control.json rewritten")
+ctl.close()
+app_mod.forget_control_file()
+check(not app_mod.CONTROL_FILE.exists(), "control.json removed on exit")
+app_mod.TCP_CONTROL = False
+
 client.shutdown()
 print("\nALL PASSED" if not fails else "\nFAILURES: " + str(fails))
 sys.exit(1 if fails else 0)

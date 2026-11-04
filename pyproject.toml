@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rgbdeck"
-version = "1.2.2"
+version = "1.2.3"
 description = "Standalone RGB lighting control for keyboards, mice and motherboards (own drivers, direct hidraw)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: System :: Hardware",
 ]
-dependencies = ["PySide6>=6.5", "hidapi>=0.14; sys_platform != 'linux'"]
+dependencies = ["PySide6>=6.5", "hidapi>=0.15; sys_platform != 'linux'"]
 
 [project.optional-dependencies]
 evdev = ["evdev>=1.6"]        # only adds extra key-code names; the common keys are built in

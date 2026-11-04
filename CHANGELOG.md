@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.3 — 2026-11-04
+
+Windows audit (still untested on real Windows hardware — please report what you see):
+
+- A stale `control.json` (crash, power loss, or simply the previous exit) could make the next start exit
+  silently if some other program now owned that port: only RGB Deck's own replies count as "already running",
+  and the file is removed on exit.
+- Input reports longer than 64 bytes were clipped (ASUS Aura, Corsair, HyperX, SteelSeries replies).
+- Keyboard / mouse system collections are opened too (Windows allows that without read/write access), so
+  drivers that send feature reports there (Razer, some Corsair / SteelSeries) can reach them; report-id-less
+  reports try every collection instead of only the first.
+- hidapi 0.15 is required: 0.14 has no `get_report_descriptor`, which left report-id routing to trial and error.
+- Typing effects: F13–F24 and JIS keys mapped to the wrong LEDs (scan codes above F12 don't match Linux codes).
+- "Open log" used `xdg-open` on Windows; a hotplug poll error no longer triggers an endless rescan loop.
+
 ## 1.2.2 — 2026-11-04
 
 - **Windows: the 1.2.0 / 1.2.1 builds could not talk to any device.** The hidapi module is loaded dynamically,

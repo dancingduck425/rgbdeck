@@ -70,8 +70,8 @@ jobs:
         shell: bash
         run: |
           rm -rf "$APPDATA/rgbdeck"
-          ./dist/RGBDeck.exe --selftest
-          rc=$?
+          rc=0
+          ./dist/RGBDeck.exe --selftest || rc=$?
           echo "--- log"; cat "$APPDATA/rgbdeck/rgbdeck.log"
           grep -q "selftest: OK" "$APPDATA/rgbdeck/rgbdeck.log" && [ "$rc" = 0 ]
       - name: Build installer

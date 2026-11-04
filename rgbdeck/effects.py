@@ -325,6 +325,18 @@ _WIN_EXTENDED_SCANCODES = {
     0x5D: 127,  # Menu
 }
 _WIN_VK_OVERRIDES = {0x13: 119, 0x90: 69, 0x2C: 99}  # VK_PAUSE, VK_NUMLOCK, VK_SNAPSHOT
+# Non-extended set-1 codes above F12 (0x58) no longer line up with Linux: F13-F24 and the JIS keys
+_WIN_HIGH_SCANCODES = {
+    **{0x64 + i: 183 + i for i in range(12)},  # F13..F24
+    0x56: 86,  # 102nd key (ISO <>)
+    0x59: 117,  # KP =
+    0x70: 93,  # Katakana/Hiragana
+    0x73: 89,  # Ro
+    0x79: 92,  # Henkan
+    0x7B: 94,  # Muhenkan
+    0x7D: 124,  # Yen
+    0x7E: 95,  # KP , (Brazilian)
+}
 
 
 def win_scancode_to_evdev(scancode: int, extended: bool, vk: int) -> int:
@@ -334,7 +346,9 @@ def win_scancode_to_evdev(scancode: int, extended: bool, vk: int) -> int:
     if extended:
         return _WIN_EXTENDED_SCANCODES.get(scancode & 0xFF, 0)
     code = scancode & 0xFF
-    return code if 0 < code < 0x80 else 0
+    if 0 < code <= 0x58:
+        return code
+    return _WIN_HIGH_SCANCODES.get(code, 0)
 
 
 class WindowsKeyListener(threading.Thread):
@@ -380,6 +394,7 @@ class WindowsKeyListener(threading.Thread):
         user32.CallNextHookEx.restype = ctypes.c_ssize_t
         user32.UnhookWindowsHookEx.argtypes = (ctypes.c_void_p,)
         user32.GetMessageW.argtypes = (ctypes.POINTER(wt.MSG), ctypes.c_void_p, wt.UINT, wt.UINT)
+        user32.PeekMessageW.argtypes = (ctypes.POINTER(wt.MSG), ctypes.c_void_p, wt.UINT, wt.UINT, wt.UINT)
         user32.PostThreadMessageW.argtypes = (wt.DWORD, wt.UINT, ctypes.c_size_t, ctypes.c_ssize_t)
         kernel32.GetCurrentThreadId.restype = wt.DWORD
         down = set()
@@ -408,10 +423,11 @@ class WindowsKeyListener(threading.Thread):
             self.error = f"SetWindowsHookEx failed (error {ctypes.get_last_error()})"
             self._ready.set()
             return
+        msg = wt.MSG()
+        user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)  # create this thread's message queue so WM_QUIT lands
         self.ok = True
         self._ready.set()
         try:
-            msg = wt.MSG()
             while not self._stopped and user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
                 user32.TranslateMessage(ctypes.byref(msg))
                 user32.DispatchMessageW(ctypes.byref(msg))

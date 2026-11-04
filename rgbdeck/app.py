@@ -154,9 +154,21 @@ def send_control(cmd: str) -> Optional[str]:
     try:
         with _control_connect() as sk:
             sk.sendall(cmd.encode() + b"\n")
-            return sk.recv(4096).decode(errors="replace").strip()
+            reply = sk.recv(4096).decode(errors="replace").strip()
     except (OSError, ValueError, KeyError):
         return None
+    # a stale control.json may point at a port some other program now owns: only our own replies count
+    if reply.split(" ", 1)[0] in ("pong", "ok", "applied", "no", "unknown"):
+        return reply
+    return None
+
+
+def forget_control_file():
+    if TCP_CONTROL:
+        try:
+            CONTROL_FILE.unlink()
+        except OSError:
+            pass
 
 
 def control_listen() -> Optional[socket.socket]:
@@ -191,6 +203,17 @@ def launch_command() -> List[str]:
         return [str(pyw if pyw.exists() else sys.executable), "-m", "rgbdeck"]
     launcher = Path.home() / ".local/bin/rgbdeck"
     return [str(launcher)] if launcher.exists() else [sys.executable, "-m", "rgbdeck"]
+
+
+def open_in_desktop(path: Path):
+    """Open a file with the desktop's default application (Explorer association on Windows, xdg-open elsewhere)."""
+    try:
+        if IS_WINDOWS:
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except OSError as e:
+        log.warning("could not open %s: %s", path, e)
 
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -1788,7 +1811,7 @@ class MainWindow(QMainWindow):
         a.triggered.connect(self._show_troubleshooting)
         h.addAction(a)
         a = QAction("Open log file", self)
-        a.triggered.connect(lambda: __import__("subprocess").Popen(["xdg-open", str(LOG_FILE)]))
+        a.triggered.connect(lambda: open_in_desktop(LOG_FILE))
         h.addAction(a)
         h.addSeparator()
         a = QAction("About RGB Deck", self)
@@ -2840,7 +2863,7 @@ def main(argv: List[str]) -> int:
     if "--selftest" in argv:  # CI check of a bundled build: drivers discoverable, Qt + icon load, nothing else
         return selftest()
 
-    if send_control("show") is not None:  # already running: just raise that window
+    if send_control("show") == "ok":  # already running: just raise that window
         return 0
     setup_logging("--verbose" in argv or "-v" in argv)
     log.info("RGB Deck starting")
@@ -2861,6 +2884,8 @@ def main(argv: List[str]) -> int:
     w.start_scan()
     rc = app.exec()
     client.shutdown()
+    if w._ctl is not None:
+        forget_control_file()
     return rc
 
 
