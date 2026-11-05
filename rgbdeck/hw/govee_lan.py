@@ -151,7 +151,104 @@ def _reset_for_tests():
 
 def found_lights() -> List[Tuple[str, str]]:
     """(model, address) of every light that is answering right now, for display."""
-    return [(r.sku or "light", r.ip) for r in _lan.present()]
+    return [(r.sku or "light", r.ip) for r in _lan.present() if not r.blind]
+
+
+def _reach(ip: str) -> str:
+    """What sits at this address, judged by how it treats a command datagram:
+
+    "refused"      something is there but nothing listens on the command port: a Govee light with LAN Control
+                   switched off (or simply not a Govee light)
+    "unreachable"  no route / host down
+    "quiet"        no objection: a light that accepts commands, or a host that drops them silently"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(0.3)
+    try:
+        s.connect((ip, CMD_PORT))
+        for _ in range(2):  # the ICMP "port unreachable" for the first send surfaces on the next call
+            s.send(b'{"msg":{"cmd":"devStatus","data":{}}}')
+            time.sleep(0.1)
+        try:
+            s.recv(64)
+        except socket.timeout:
+            pass
+        return "quiet"
+    except (ConnectionRefusedError, ConnectionResetError):  # Linux / macOS, Windows
+        return "refused"
+    except OSError:
+        return "unreachable"
+    finally:
+        s.close()
+
+
+def diagnose(ip: str, wait: float = 1.5) -> Tuple[str, str]:
+    """Check one address the user typed: ("found", model) when a Govee light answers there, otherwise
+    ("refused" | "unreachable" | "quiet" | "invalid", "") as in _reach(). Blocks for up to `wait` seconds."""
+    ip = ip.strip()
+    if not _valid_ip(ip):
+        return "invalid", ""
+    lan = _lan
+    lan.start()
+    t0 = time.monotonic()
+    lan.send(ip, "scan", {"account_topic": "reserve"}, SCAN_PORT)
+    state = _reach(ip)
+    lan.reach[ip] = state
+
+    def answered() -> bool:
+        return any(r.ip == ip and r.last_seen >= t0 for r in lan.lights.values())
+
+    if lan.listening and state == "quiet" and lan.wait_until(t0 + wait, answered) or answered():
+        return "found", next((r.sku for r in lan.lights.values() if r.ip == ip), "")
+    return state, ""
+
+
+def rescan():
+    """Look for lights now instead of at the next 30 s tick."""
+    if _config()["enabled"]:
+        _lan.start()
+        _lan.scan()
+
+
+def forget(ip: str) -> bool:
+    """Drop an address the user added and any remembered light at it; True if something was removed."""
+    cfg = _config()
+    gone = [k for k, v in cfg["known"].items() if v.get("ip") == ip]
+    if ip not in cfg["manual"] and not gone:
+        return False
+    cfg["manual"] = [x for x in cfg["manual"] if x != ip]
+    for k in gone:
+        del cfg["known"][k]
+    with _lan.cv:
+        for k in gone:
+            _lan.lights.pop(k, None)
+        _lan.reach.pop(ip, None)
+    _save_config()
+    return True
+
+
+def status_report() -> List[dict]:
+    """Every light RGB Deck knows about, for the Lights panel: {"name", "ip", "state"} with state one of
+    connected | refused | unreachable | blind | silent | checking."""
+    cfg, lan = _config(), _lan
+    rows, listed = [], set()
+    present = lan.present()
+    for r in present:
+        if not r.blind:
+            rows.append({"name": f"Govee {r.sku}" if r.sku else "Govee light", "ip": r.ip, "state": "connected"})
+            listed.add(r.ip)
+    for v in cfg["known"].values():
+        ip = v.get("ip") or ""
+        if ip and ip not in listed:
+            reach = lan.reach.get(ip, "checking")
+            state = "silent" if reach == "quiet" else reach
+            rows.append({"name": f"Govee {v.get('sku')}" if v.get("sku") else "Govee light", "ip": ip, "state": state})
+            listed.add(ip)
+    for ip in cfg["manual"]:
+        if ip not in listed:
+            reach = lan.reach.get(ip, "checking")
+            rows.append({"name": "Light added by address", "ip": ip, "state": "blind" if reach == "quiet" else reach})
+            listed.add(ip)
+    return rows
 
 
 # ----------------------------------------------------------------------------- transport
@@ -211,6 +308,8 @@ class _Lan:
         self.status: Dict[str, Tuple[float, dict]] = {}  # ip -> (when, devStatus data)
         self.last_scan = 0.0
         self.probed: frozenset = frozenset()
+        self.reach: Dict[str, str] = {}  # address -> _reach() verdict, for addresses that are not answering scans
+        self._reach_busy = False
 
     # ---- socket ------------------------------------------------------------------
     def start(self):
@@ -240,6 +339,7 @@ class _Lan:
             self.status.clear()
             self.last_scan = 0.0
             self.probed = frozenset()
+            self.reach.clear()
         if s is not None:
             try:
                 s.close()
@@ -289,6 +389,27 @@ class _Lan:
         for ip in direct:
             if ip and _valid_ip(ip):
                 self.send(ip, "scan", request, SCAN_PORT)
+        # addresses we were told about but that stay silent: find out why (off the caller's thread, it waits)
+        wanted = [
+            ip for ip in {v.get("ip") for v in cfg["known"].values()} | set(cfg["manual"]) if ip and _valid_ip(ip)
+        ]
+        if wanted and not self._reach_busy:
+            self._reach_busy = True
+            threading.Thread(target=self._check_reach, args=(wanted,), name="rgbdeck-govee-reach", daemon=True).start()
+
+    def _check_reach(self, ips: List[str]):
+        try:
+            time.sleep(0.5)  # give scan answers time to arrive: an answering light needs no verdict
+            now = time.monotonic()
+            with self.cv:
+                answering = {r.ip for r in self.lights.values() if r.last_seen and now - r.last_seen < 5.0}
+            for ip in ips:
+                if ip in answering:
+                    self.reach.pop(ip, None)
+                else:
+                    self.reach[ip] = _reach(ip)
+        finally:
+            self._reach_busy = False
 
     def _reader(self, s: socket.socket):
         while self.sock is s:
@@ -353,7 +474,9 @@ class _Lan:
         # an address that once belonged to an answering light is that light: don't also show it blind
         taken = {r.ip for r in out} | {v.get("ip") for v in cfg["known"].values()}
         for ip in cfg["manual"]:
-            if ip not in taken:
+            # only an address that takes commands without objection is worth driving blind; one that refuses
+            # them (LAN Control off) or is unreachable would be a device card that does nothing
+            if ip not in taken and self.reach.get(ip) == "quiet":
                 blind = _Light(f"ip:{ip}", ip)
                 blind.blind = True
                 out.append(blind)
@@ -694,6 +817,10 @@ def probe() -> List[GoveeLight]:
         # Remembered lights get a moment to answer. Lights nobody has seen yet are picked up by the
         # hotplug poll a few seconds later, so a machine without any does not pay for the wait.
         lan.wait_until(t0 + (PROBE_WAIT if expected or cfg["manual"] else FIRST_WAIT), answered)
+    answering = {r.ip for r in lan.lights.values() if r.last_seen >= t0}
+    for ip in cfg["manual"]:
+        if ip not in answering and ip not in lan.reach:
+            lan.reach[ip] = _reach(ip)  # first time: decide now whether it can be driven blind
     lights = lan.present()
     asked = [r for r in lights if not r.blind]
     if asked and lan.listening:
@@ -713,7 +840,11 @@ __all__ = [
     "USB_IDS",
     "GoveeLight",
     "fingerprint",
+    "diagnose",
+    "forget",
     "found_lights",
+    "rescan",
+    "status_report",
     "get_settings",
     "probe",
     "probed",

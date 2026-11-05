@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1 — 2026-11-04
+
+- **Lights panel**: a 💡 Lights button next to the device cards (also File → Network lights…) lists every Govee
+  light with its state, explains how to connect one, and checks an address you type. It tells apart a light
+  that answers, one that is on the network but refuses local control (LAN Control still off in the Govee Home
+  app), one that is unreachable, and one that takes commands without answering (firewall).
+- An address that refuses commands is kept on the list and picked up as soon as LAN Control is switched on,
+  instead of showing as a device card that does nothing.
+
 ## 1.3.0 — 2026-11-04
 
 - **Govee Wi-Fi lights** through Govee's LAN API (local UDP; no cloud, no account). Lights with "LAN Control"

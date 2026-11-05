@@ -238,6 +238,16 @@ app_mod.forget_control_file()
 check(not app_mod.CONTROL_FILE.exists(), "control.json removed on exit")
 app_mod.TCP_CONTROL = False
 
+# the Lights panel opens and lists nothing when no light is known (looking switched off: no network traffic here)
+from rgbdeck.hw import govee_lan  # noqa: E402
+
+govee_lan.set_settings(False, [])
+panel = app_mod.LightsDialog(w)
+check(not panel.enable.isChecked() and panel.rows.count() == 1, "Lights panel opens with its empty state")
+panel._timer.stop()
+panel.close()
+check(hasattr(w, "lights_btn"), "main window has the Lights button")
+
 client.shutdown()
 print("\nALL PASSED" if not fails else "\nFAILURES: " + str(fails))
 sys.exit(1 if fails else 0)

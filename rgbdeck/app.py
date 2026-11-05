@@ -1487,6 +1487,201 @@ class EffectsPanel(QWidget):
 # =============================================================================
 # Settings dialog
 # =============================================================================
+LIGHT_STATES = {
+    "connected": ("#3ddc84", "Connected."),
+    "refused": (
+        "#ffb020",
+        "On your network, but it refuses local control. Switch on <b>LAN Control</b> for it in the Govee Home app; "
+        "RGB Deck picks it up by itself after that.",
+    ),
+    "unreachable": ("#ff5d6c", "Not reachable. Is it powered and on this network?"),
+    "blind": ("#8ab4ff", "No answer comes back, colors are sent anyway (a firewall may be dropping its replies)."),
+    "silent": ("#ffb020", "Known light, not answering right now."),
+    "checking": ("#7d8398", "Checking…"),
+}
+
+
+class LightsDialog(QDialog):
+    """Network lights: what is connected, why something is not, how to connect one, add by address."""
+
+    checked = Signal(str, str, str)  # address, verdict, model
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Lights on your network")
+        self.setMinimumWidth(600)
+        self.changed = False  # the caller rescans devices when something was added / removed / switched
+        self._shown = None
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+        head = QLabel("💡  Govee lights")
+        head.setObjectName("devTitle")
+        lay.addWidget(head)
+        intro = QLabel(
+            "RGB Deck drives Govee Wi-Fi lights directly over your network. No account, no cloud. "
+            "A connected light shows up as a device next to your keyboard and mouse."
+        )
+        intro.setWordWrap(True)
+        intro.setObjectName("hint")
+        lay.addWidget(intro)
+        self.enable = QCheckBox("Look for Govee lights on my network")
+        self.enable.setChecked(govee_lan.get_settings()["enabled"])
+        self.enable.setToolTip(
+            "Windows asks once whether RGB Deck may use your network: allow it for private networks."
+        )
+        self.enable.toggled.connect(self._toggle)
+        lay.addWidget(self.enable)
+
+        card = QFrame()
+        card.setObjectName("card")
+        self.rows = QVBoxLayout(card)
+        self.rows.setContentsMargins(14, 12, 14, 12)
+        self.rows.setSpacing(10)
+        lay.addWidget(card)
+
+        add = QHBoxLayout()
+        self.addr = QLineEdit()
+        self.addr.setPlaceholderText("Light address, e.g. 192.168.1.50")
+        self.addr.returnPressed.connect(self._check)
+        add.addWidget(self.addr, 1)
+        self.check_btn = QPushButton("Check and add")
+        self.check_btn.setObjectName("primary")
+        self.check_btn.clicked.connect(self._check)
+        add.addWidget(self.check_btn)
+        again = QPushButton("Search again")
+        again.clicked.connect(self._search)
+        add.addWidget(again)
+        lay.addLayout(add)
+        self.result = QLabel("")
+        self.result.setWordWrap(True)
+        lay.addWidget(self.result)
+
+        steps = QLabel(
+            "<b>Connecting a Govee light</b><br>"
+            "1. Open the <b>Govee Home</b> app on your phone and tap the light.<br>"
+            "2. Tap the settings gear (top right) and switch on <b>LAN Control</b>.<br>"
+            "3. Keep the light on the same network as this PC. It appears here within half a minute.<br><br>"
+            "Not every model has the switch: Bluetooth-only Govee lights can't be reached this way. "
+            "If a light with LAN Control on is still not found, type its address above. "
+            "A firewall on this PC has to let incoming UDP port 4002 through for lights to be found by themselves."
+        )
+        steps.setWordWrap(True)
+        steps.setObjectName("hint")
+        lay.addWidget(steps)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(self.accept)
+        lay.addWidget(bb)
+
+        self.checked.connect(self._checked)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._refresh)
+        self._timer.start(1000)
+        govee_lan.rescan()
+        self._refresh()
+
+    # ---- list -------------------------------------------------------------------
+    def _refresh(self):
+        rows = govee_lan.status_report() if self.enable.isChecked() else []
+        if rows == self._shown:
+            return
+        self._shown = rows
+        while self.rows.count():
+            item = self.rows.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if not rows:
+            empty = QLabel(
+                "No light found yet. Follow the steps below, then wait a moment or press “Search again”."
+                if self.enable.isChecked()
+                else "Not looking for lights. Switch it on above."
+            )
+            empty.setWordWrap(True)
+            self.rows.addWidget(empty)
+            return
+        for r in rows:
+            color, text = LIGHT_STATES.get(r["state"], LIGHT_STATES["checking"])
+            w = QWidget()
+            h = QHBoxLayout(w)
+            h.setContentsMargins(0, 0, 0, 0)
+            lbl = QLabel(
+                f"<span style='color:{color}'>●</span>&nbsp; <b>{r['name']}</b> "
+                f"<span style='color:#7d8398'>· {r['ip']}</span><br>{text}"
+            )
+            lbl.setWordWrap(True)
+            h.addWidget(lbl, 1)
+            if r["state"] != "connected":
+                rm = QPushButton("Remove")
+                rm.clicked.connect(lambda _c=False, ip=r["ip"]: self._remove(ip))
+                h.addWidget(rm, 0, Qt.AlignTop)
+            self.rows.addWidget(w)
+
+    def _toggle(self, on: bool):
+        govee_lan.set_settings(on, govee_lan.get_settings()["manual"])
+        self.changed = True
+        govee_lan.rescan()
+        self._refresh()
+
+    def _search(self):
+        if not self.enable.isChecked():
+            self.result.setText("Switch on “Look for Govee lights on my network” first.")
+            return
+        govee_lan.rescan()
+        self.result.setText("Searching… lights that answer appear in the list within a few seconds.")
+
+    def _remove(self, ip: str):
+        if govee_lan.forget(ip):
+            self.changed = True
+        self._refresh()
+
+    # ---- add by address -------------------------------------------------------------
+    def _check(self):
+        ip = self.addr.text().strip()
+        if not ip or not self.check_btn.isEnabled():
+            return
+        self.check_btn.setEnabled(False)
+        self.result.setText(f"Checking {ip}…")
+
+        def work():
+            verdict, sku = govee_lan.diagnose(ip)
+            self.checked.emit(ip, verdict, sku)
+
+        threading.Thread(target=work, name="rgbdeck-govee-check", daemon=True).start()
+
+    def _checked(self, ip: str, verdict: str, sku: str):
+        self.check_btn.setEnabled(True)
+        if verdict == "invalid":
+            self.result.setText(
+                "That is not an address. It looks like 192.168.1.50; your router's device list shows it."
+            )
+            return
+        if verdict == "unreachable":
+            self.result.setText(f"Nothing reachable at {ip}. Check the address and that the light is powered.")
+            return
+        cfg = govee_lan.get_settings()
+        if verdict == "found":
+            govee_lan.set_settings(True, cfg["manual"])
+            self.result.setText(f"Found a Govee {sku} at {ip}. It appears as a device in a moment.")
+        else:
+            govee_lan.set_settings(True, cfg["manual"] + [ip])
+            if verdict == "refused":
+                self.result.setText(
+                    f"Something is at {ip}, but it refuses local control. If that is your Govee light, LAN Control "
+                    "is still off: Govee Home app, the light, settings gear, LAN Control. It is on the list now "
+                    "and RGB Deck picks it up as soon as the switch is on."
+                )
+            else:
+                self.result.setText(
+                    f"No answer from {ip}. Added anyway: colors are sent there blind, which works when a "
+                    "firewall is only dropping the light's replies."
+                )
+        self.enable.blockSignals(True)
+        self.enable.setChecked(True)
+        self.enable.blockSignals(False)
+        self.changed = True
+        self.addr.clear()
+        self._refresh()
+
+
 class SettingsDialog(QDialog):
     def __init__(self, settings: dict, parent=None):
         super().__init__(parent)
@@ -1628,6 +1823,12 @@ class MainWindow(QMainWindow):
         self.tabs_lay = QHBoxLayout()
         self.tabs_lay.setSpacing(8)
         top.addLayout(self.tabs_lay)
+        self.lights_btn = QPushButton("💡  Lights")
+        self.lights_btn.setToolTip(
+            "Govee lights on your network: what is connected, how to connect one, add by address"
+        )
+        self.lights_btn.clicked.connect(self._open_lights)
+        top.addWidget(self.lights_btn)
         top.addStretch(1)
         self.sync_chk = QCheckBox("Sync all devices")
         self.sync_chk.setToolTip("When on, colors you apply go to every device (keyboard, mouse, …) at once")
@@ -1829,6 +2030,9 @@ class MainWindow(QMainWindow):
         m = self.menuBar().addMenu("&File")
         a = QAction("Rescan devices", self)
         a.triggered.connect(self._rescan)
+        m.addAction(a)
+        a = QAction("Network lights…", self)
+        a.triggered.connect(self._open_lights)
         m.addAction(a)
         a = QAction("Settings…", self)
         a.triggered.connect(self._open_settings)
@@ -2605,6 +2809,12 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("A device stopped answering — looking again…")
         self.dev = None
         self.start_scan()
+
+    def _open_lights(self):
+        dlg = LightsDialog(self)
+        dlg.exec()
+        if dlg.changed:
+            self.start_scan()
 
     def _open_settings(self):
         dlg = SettingsDialog(dict(self.settings), self)

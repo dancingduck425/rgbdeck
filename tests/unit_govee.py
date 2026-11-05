@@ -348,6 +348,25 @@ client.wait_idle()
 settle()
 check(light.color == (255, 0, 0) and light.on, "commands reach it")
 check(not client.poll_notifications(), "blind light is stable")
+rows = gl.status_report()
+check(
+    len(rows) == 1 and rows[0]["state"] == "blind" and rows[0]["ip"] == "127.0.0.1", f"status: sending blind ({rows})"
+)
+
+# --- checking an address the user typed
+check(gl.diagnose("nonsense") == ("invalid", ""), "diagnose: not an address")
+light.answer = True
+check(gl.diagnose("127.0.0.1", wait=1.0) == ("found", "H618F"), "diagnose: a light answers there")
+rows = gl.status_report()
+check(
+    len(rows) == 1 and rows[0] == {"name": "Govee H618F", "ip": "127.0.0.1", "state": "connected"},
+    f"status: connected ({rows})",
+)
+check(
+    gl.forget("127.0.0.1") and gl.status_report() == [] and not gl.forget("127.0.0.1"),
+    "forget removes the address and the light",
+)
+light.answer = False
 
 # --- switched off in settings
 gl.set_settings(False, [])
@@ -366,8 +385,20 @@ check(len(client.devices) == 1 and client.devices[0].type_name == "Light", "unkn
 un = [m.name for m in client.devices[0].modes]
 check(un == ["Direct", "Off", "Warm White", "Neutral White", "Cool White"], f"generic modes only ({un})")
 
-client.shutdown()
+# --- LAN Control off: the light is on the network but nothing listens on its command port
 light.close()
+gl.set_settings(True, [])
+gl._config()["known"].clear()
+gl._lan.lights.clear()
+check(gl.diagnose("127.0.0.1", wait=0.2) == ("refused", ""), "diagnose: something is there but refuses commands")
+gl.set_settings(True, ["127.0.0.1"])
+client.refresh()
+check(client.devices == [], "an address that refuses commands is not shown as a device")
+rows = gl.status_report()
+check(len(rows) == 1 and rows[0]["state"] == "refused", f"status: refused ({rows})")
+check(not client.poll_notifications(), "and it does not cause rescans")
+
+client.shutdown()
 gl._reset_for_tests()
 check(threading.active_count() < 6, f"no thread leak ({threading.active_count()})")
 print("\nALL PASSED" if not fails else "\nFAILURES: " + str(fails))

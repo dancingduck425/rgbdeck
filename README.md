@@ -49,9 +49,11 @@ open a device-support issue with your `lsusb` line.
 1. In the **Govee Home** app open the light, tap the settings gear and switch on **LAN Control**. (Not every
    model has it; Bluetooth-only lights don't.)
 2. Keep the light on the same network as the PC. RGB Deck finds it within half a minute and remembers it.
+   The **💡 Lights** button next to the device cards lists every light with its state and says what is wrong
+   when one is not connected ("on your network, but LAN Control is off", "not reachable", …).
 3. If it doesn't show up: a firewall is probably dropping the light's answers. Allow incoming UDP port 4002
    from your LAN (`sudo ufw allow proto udp from 192.168.0.0/16 to any port 4002`), or type the light's address
-   under **Settings → Network lights**, which works without any answer coming back.
+   in the Lights panel, which checks it and works even without any answer coming back.
 
 On Windows, looking for lights is off until you tick **Settings → Find Govee lights on my network**, because
 Windows then asks once whether RGB Deck may use your network.
