@@ -559,13 +559,36 @@ class EffectEngine:
             return r * 0.18, g * 0.18, b * 0.18
         return float(r), float(g), float(b)
 
-    def tick(self, now: Optional[float] = None) -> Optional[List[int]]:
-        now = time.monotonic() if now is None else now
+    def _timing(self) -> Tuple[float, float, float, float]:
         s = self.settings
         speed = 4.0 + s.speed / 100.0 * 26.0  # key-units per second
         thickness = 0.8 + s.size / 100.0 * 3.2  # ring thickness in key units
         life = (self._extent + thickness) / speed
         glow_life = 0.25 + s.fade / 100.0 * 2.0
+        return speed, thickness, life, glow_life
+
+    def activity(self, now: Optional[float] = None) -> Tuple[float, Tuple[int, int, int]]:
+        """How strongly the most visible key press still shows (0..1) and its color. Lights without keys
+        (a room strip) use it to pulse along with the keyboard."""
+        now = time.monotonic() if now is None else now
+        _speed, _thickness, life, glow_life = self._timing()
+        pulse = min(life, 0.9)  # a ripple may travel for seconds; the flash it causes stays short
+        best, color = 0.0, (0, 0, 0)
+        with self._lock:
+            for rp in self._ripples:
+                w = max(0.0, 1.0 - (now - rp.t0) / pulse) ** 1.5
+                if w > best:
+                    best, color = w, rp.color
+            for gl in self._glows:
+                w = max(0.0, 1.0 - (now - gl.t0) / glow_life) ** 1.3
+                if w > best:
+                    best, color = w, gl.color
+        return best, color
+
+    def tick(self, now: Optional[float] = None) -> Optional[List[int]]:
+        now = time.monotonic() if now is None else now
+        s = self.settings
+        speed, thickness, life, glow_life = self._timing()
         with self._lock:
             self._ripples = [r for r in self._ripples if now - r.t0 <= life]
             self._glows = [g for g in self._glows if now - g.t0 <= glow_life]

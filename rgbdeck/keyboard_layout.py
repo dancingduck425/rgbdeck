@@ -348,8 +348,11 @@ def build_generic_geometry(dev: Device, per_row: int = 16) -> List[KeyGeom]:
         for n in range(z.leds_count):
             led = z.start_idx + n
             label = label_for(dev.led_names[led]) if led < len(dev.led_names) else str(n + 1)
-            if label.startswith(z.name):
-                label = label[len(z.name) :].strip(" ,") or str(n + 1)
+            full = dev.led_names[led] if led < len(dev.led_names) else ""
+            for prefix in (z.name, z.name.rstrip("s")):  # "Channel 1, LED 3" / zone "Segments" + "Segment 3"
+                if prefix and full.startswith(prefix):
+                    label = label_for(full[len(prefix) :].strip(" ,")) or str(n + 1)
+                    break
             geoms.append(KeyGeom(led, (n % per_row) * 1.0, y + (n // per_row), 1.0, 1.0, label))
         y += (z.leds_count + per_row - 1) // per_row + 0.6
     return geoms

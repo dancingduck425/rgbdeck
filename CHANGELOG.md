@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0 — 2026-11-04
+
+- **Govee Wi-Fi lights** through Govee's LAN API (local UDP; no cloud, no account). Lights with "LAN Control"
+  switched on in the Govee Home app are found automatically, remembered, and can also be added by address.
+  Color, brightness, warm / neutral / cool white, on/off for every LAN-capable model; per-segment painting and
+  the light's own scenes for the 272 models in the built-in table. Updates are rate-limited per light and the
+  final state is sent twice, since UDP gives no delivery guarantee. Developed against a simulated light —
+  **not yet confirmed on real hardware**, hence marked experimental.
+- **Room lights pulse with typing effects**: while ripple / glow runs on the keyboard, network lights flash
+  toward the color of each key press and fall back to their own color (Settings; lights that are off stay off).
+- The backend understands devices that are not USB (`fingerprint()` / `probed()`), so further network lights
+  are one driver each.
+- Dialogs, menus and tooltips are dark on every desktop theme. On a light theme (Windows' default) Settings and
+  Help were light text on a white background.
+- Typing-effect controls are only offered for devices that have keys.
+
+Linux users with a firewall: allow incoming UDP 4002 from your LAN, or add the light by address.
+
 ## 1.2.3 — 2026-11-04
 
 Windows audit (still untested on real Windows hardware — please report what you see):

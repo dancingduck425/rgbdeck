@@ -22,6 +22,14 @@ heartbeat, `battery()`, `read_colors()`, and `resize_zone(zone_index, count)` fo
 Add a hardware-free `tests/unit_<name>.py` that asserts exact packet bytes through a fake `HidDevice` — CI runs every
 `tests/unit*.py`.
 
+**Network devices.** A driver for something that is not USB (see `rgbdeck/hw/govee_lan.py`) sets `USB_IDS = []`
+and tells the backend who is there through two more module functions: `fingerprint()` returns the ids present
+right now (called every two seconds, so keep it cheap and do your own rate limiting for scans) and `probed()`
+returns the ids the last `probe()` handed out. When the two differ the backend rescans. Never block in
+`set_colors` / `set_mode`: they run on the one worker thread all devices share, so rate-limit with your own
+sender thread instead of sleeping. A driver whose device remembers its state sets `keeps_state = True`; one
+that should flash along with a keyboard's typing effect sets `follows_typing = True`.
+
 Good protocol sources: USB captures of the vendor software (Wireshark + USBPcap) and existing open-source
 driver code for the device (GPL-2.0 sources are license-compatible with this project).
 

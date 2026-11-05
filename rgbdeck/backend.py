@@ -40,6 +40,7 @@ FROZEN_DRIVER_MODULES = (
     "corsair_lighting_node",
     "steelseries",
     "hyperx",
+    "govee_lan",
 )
 
 
@@ -70,6 +71,7 @@ class LocalBackend:
         self.devices: List[Device] = []
         self._drivers: Dict[int, object] = {}
         self._seen: set = set()
+        self._net_mods: list = []  # driver modules with their own presence check (network lights)
         self.last_error = ""
         self._io_lock = threading.Lock()
         self._cv = threading.Condition()
@@ -208,8 +210,23 @@ class LocalBackend:
             self._stop = True
             self._cv.notify_all()
 
-    def _fingerprint(self) -> set:
-        return {(i.path, i.vid, i.pid) for i in hidraw.enumerate_hid(with_descriptors=False)}
+    def _fingerprint(self, adopted: bool = False) -> set:
+        """What is plugged in / on the network right now; a change means "rescan".
+
+        Drivers for things that are not USB (network lights) add to it through two module functions:
+        fingerprint() = present now, probed() = what the last probe() handed out. adopted=True asks for
+        the latter, so a light that answered a moment too late for the probe still triggers a rescan."""
+        try:
+            fp = {(i.path, i.vid, i.pid) for i in hidraw.enumerate_hid(with_descriptors=False)}
+        except DeviceError:
+            fp = set()
+        for mod in self._net_mods:
+            fn = getattr(mod, "probed" if adopted and callable(getattr(mod, "probed", None)) else "fingerprint")
+            try:
+                fp |= {(mod.__name__, x) for x in fn()}
+            except Exception:  # noqa: BLE001 - presence checks must never take the poll down
+                log.exception("presence check failed in %s", mod.__name__)
+        return fp
 
     def refresh(self):
         """Re-enumerate everything. Devices still present keep their colors/mode state."""
@@ -217,7 +234,9 @@ class LocalBackend:
         self.close()
         errors = []
         with self._io_lock:
-            for mod in discover_drivers():
+            mods = discover_drivers()
+            self._net_mods = [m for m in mods if callable(getattr(m, "fingerprint", None))]
+            for mod in mods:
                 experimental = bool(
                     getattr(mod, "EXPERIMENTAL", mod.__name__.rsplit(".", 1)[-1] not in PREFERRED_DRIVERS)
                 )
@@ -231,7 +250,7 @@ class LocalBackend:
                     log.exception("probe failed in %s", mod.__name__)
                     errors.append(f"{mod.__name__}: {e}")
         self.last_error = "; ".join(errors)
-        self._seen = self._fingerprint()
+        self._seen = self._fingerprint(adopted=True)
         log.info("devices: %s", [f"{d.type_name}:{d.name}" for d in self.devices])
 
     def _adopt(self, drv, old):

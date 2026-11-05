@@ -43,6 +43,7 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPainterPath,
+    QPalette,
     QPen,
     QRadialGradient,
     QShortcut,
@@ -93,10 +94,7 @@ log = logging.getLogger("rgbdeck")
 IS_WINDOWS = sys.platform == "win32"
 
 
-def _config_root() -> Path:
-    if IS_WINDOWS:
-        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+from rgbdeck.paths import config_root as _config_root  # noqa: E402
 
 
 LOG_FILE = _config_root() / "rgbdeck" / "rgbdeck.log"
@@ -116,6 +114,7 @@ def setup_logging(verbose: bool):
 
 
 from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
+from rgbdeck.hw import govee_lan  # noqa: E402
 from rgbdeck.effects import EffectEngine, EffectSettings, KeyListener, find_keyboard_events  # noqa: E402
 
 APP_NAME = "RGB Deck"
@@ -295,6 +294,7 @@ ICONS = {
     "DRAM": "▥",
     "Headset": "🎧",
     "LED Strip": "〰",
+    "Light": "💡",
     "Cooler": "❄",
     "Mousemat": "▭",
 }
@@ -1512,6 +1512,37 @@ class SettingsDialog(QDialog):
         self.fps.setValue(int(settings.get("fx_fps", 24)))
         self.fps.setToolTip("Frames per second for typing effects. Most keyboards manage 20–30.")
         form.addRow("Effect speed (fps)", self.fps)
+        self.follow = QCheckBox("Room lights pulse along with typing effects")
+        self.follow.setChecked(settings.get("fx_follow", True))
+        self.follow.setToolTip("While a typing effect runs on the keyboard, network lights flash with every key press.")
+        form.addRow("", self.follow)
+        net = govee_lan.get_settings()
+        self.network_changed = False
+        self.govee = QCheckBox("Find Govee lights on my network")
+        self.govee.setChecked(net["enabled"])
+        self.govee.setToolTip(
+            "Works with Govee Wi-Fi lights once 'LAN Control' is switched on for them in the Govee Home app\n"
+            "(open the light, settings gear, LAN Control). No account or cloud is used.\n"
+            "Windows asks once whether RGB Deck may use your network: allow it for private networks."
+        )
+        form.addRow("Network lights", self.govee)
+        self.govee_ips = QLineEdit(", ".join(net["manual"]))
+        self.govee_ips.setPlaceholderText("Optional: light addresses, e.g. 192.168.1.50")
+        self.govee_ips.setToolTip(
+            "Only needed when a light is not found by itself: another network segment,\n"
+            "or a firewall that drops the light's answers (incoming UDP port 4002)."
+        )
+        form.addRow("", self.govee_ips)
+        found = govee_lan.found_lights() if net["enabled"] else []
+        gl = QLabel(
+            "Found: " + ", ".join(f"{sku} at {ip}" for sku, ip in found)
+            if found
+            else "No Govee light is answering right now."
+            if net["enabled"]
+            else "Not looking for network lights."
+        )
+        gl.setObjectName("hint")
+        form.addRow("", gl)
         lf = QLabel(f"Log file: {LOG_FILE}")
         lf.setObjectName("hint")
         form.addRow("", lf)
@@ -1524,6 +1555,9 @@ class SettingsDialog(QDialog):
         self.settings["sync"] = self.sync.isChecked()
         self.settings["fx_fps"] = self.fps.value()
         self.settings["keep_on_close"] = self.keep.isChecked()
+        self.settings["fx_follow"] = self.follow.isChecked()
+        ips = [x for x in self.govee_ips.text().replace(";", ",").replace(" ", ",").split(",") if x]
+        self.network_changed = govee_lan.set_settings(self.govee.isChecked(), ips)
         try:
             set_autostart("tray", ["--tray"] if self.tray_start.isChecked() else None)
         except OSError as e:
@@ -1563,6 +1597,7 @@ class MainWindow(QMainWindow):
         self.engine: Optional[EffectEngine] = None
         self.engine_dev: Optional[Device] = None
         self.engine_kind: Optional[str] = None
+        self._follow_last: Dict[int, List[int]] = {}  # device index -> frame last sent to a light that pulses along
         self.listener: Optional[KeyListener] = None
         self._fx_timer = QTimer(self)
         self._fx_timer.timeout.connect(self._fx_tick)
@@ -1664,7 +1699,7 @@ class MainWindow(QMainWindow):
         zl = QHBoxLayout(self.zone_row)
         zl.setContentsMargins(0, 0, 0, 0)
         zl.setSpacing(8)
-        self.zone_lbl = QLabel("LEDs per channel")
+        self.zone_lbl = QLabel("LED count")
         self.zone_lbl.setObjectName("hint")
         zl.addWidget(self.zone_lbl)
         self.zone_spins: Dict[int, QSpinBox] = {}
@@ -1881,7 +1916,8 @@ class MainWindow(QMainWindow):
         if not has_keys:
             self._set_interaction("device")
         self.effects.set_device(d)
-        self.effects.show_app_section(has_keys)
+        typed = d.type_name == "Keyboard" or any(n.startswith("Key: ") for n in d.led_names)
+        self.effects.show_app_section(has_keys and typed)
         self.effects.set_app_effect(
             self.engine_kind if (self.engine_dev is d) else None,
             self.engine.settings if (self.engine_dev is d and self.engine) else None,
@@ -2283,6 +2319,7 @@ class MainWindow(QMainWindow):
             self.listener.stop()
             self.listener = None
         self._fx_timer.stop()
+        self._pulse_followers(restore=True)
         if self.engine and self.engine_dev:
             d = self.engine_dev
             base = self.base_colors.get(d.index, list(d.colors))
@@ -2316,7 +2353,10 @@ class MainWindow(QMainWindow):
         if not self.engine or not self.engine_dev or not self.client.connected:
             return
         frame = self.engine.tick()
-        if frame is None or frame == self._fx_last_frame:
+        if frame is None:
+            return
+        self._pulse_followers()
+        if frame == self._fx_last_frame:
             return
         self._fx_last_frame = frame
         try:
@@ -2328,6 +2368,48 @@ class MainWindow(QMainWindow):
             return
         if self.engine_dev is self.dev:
             self.canvas.set_colors(frame)
+
+    # ----------------------------------------------- lights that pulse along
+    def _shown_base(self, d: Device) -> List[int]:
+        """The device's plain colors as they are sent (base colors with its dimming applied)."""
+        base = self.base_colors.get(d.index, list(d.colors))
+        f = self.dim.get(d.index, 100) / 100.0
+        return list(base) if f >= 0.999 else [rgb_to_u32(*(int(x * f + 0.5) for x in u32_to_rgb(c))) for c in base]
+
+    def _pulse_followers(self, restore: bool = False):
+        """Room lights have no keys to ripple across, so they flash toward the color of each key press while a
+        typing effect runs on the keyboard, and fall back to their own colors as it fades."""
+        level, col = (0.0, (0, 0, 0)) if restore or not self.engine else self.engine.activity()
+        quiet = level < 0.02
+        if quiet and not self._follow_last:
+            return
+        for d in self.client.devices:
+            pulsing = d.index in self._follow_last
+            if d is self.engine_dev or not (pulsing or self.settings.get("fx_follow", True)):
+                continue
+            if not getattr(self.client.driver_for(d), "follows_typing", False):
+                continue
+            if d.current_mode.color_mode != MODE_COLORS_PER_LED:
+                continue  # showing a scene or white: leave it alone
+            base = self._shown_base(d)
+            if not any(base):
+                continue  # the light is off: typing must not switch it on
+            if quiet:
+                out = base
+            else:
+                k = min(1.0, level) * 0.9
+                out = [rgb_to_u32(*(int(a + (b - a) * k) for a, b in zip(u32_to_rgb(c), col))) for c in base]
+            if self._follow_last.get(d.index) == out or (quiet and not pulsing):
+                continue
+            self._follow_last[d.index] = out
+            try:
+                self.client.update_leds(d, out)
+            except DeviceError:
+                continue
+            if d is self.dev:
+                self.canvas.set_colors(out)
+        if quiet:
+            self._follow_last.clear()
 
     # ----------------------------------------------------------- presets
     def _snapshot(self) -> dict:
@@ -2479,6 +2561,7 @@ class MainWindow(QMainWindow):
 
     def _scan_done(self):
         self._scanning = False
+        self._follow_last.clear()
         self.base_colors = {d.index: list(d.colors) for d in self.client.devices}
         self.dim = {d.index: self.dim.get(d.index, 100) for d in self.client.devices}
         self._populate_devices()
@@ -2533,6 +2616,8 @@ class MainWindow(QMainWindow):
         if self.engine:
             self.engine.settings.fps = int(self.settings.get("fx_fps", 24))
             self._fx_timer.setInterval(int(1000 / max(10, self.engine.settings.fps)))
+        if dlg.network_changed:
+            self.start_scan()
 
     def _show_troubleshooting(self):
         rules = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "70-rgbdeck.rules")
@@ -2555,7 +2640,10 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Troubleshooting",
-            access + "<b>Device not listed</b><br>Only families with a driver are detected (see the README table). "
+            access + "<b>Govee light not found</b><br>Switch on <b>LAN Control</b> for the light in the Govee Home "
+            "app (open the light, settings gear, LAN Control). Keep it on the same network as this PC and let "
+            "incoming UDP port 4002 through your firewall. Settings → Network lights can also add it by address."
+            "<br><br><b>Device not listed</b><br>Only families with a driver are detected (see the README table). "
             "Another program talking to the device (vendor software, OpenRGB…) must be closed first.<br><br>"
             "<b>Colors don't change on a Glorious mouse</b><br>Its lighting is stored per onboard profile; "
             "RGB Deck writes all three, so this should not happen — if it does, press the profile button once.<br><br>"
@@ -2702,6 +2790,8 @@ class MainWindow(QMainWindow):
             return
         needs_login = False
         for d in self.client.devices:
+            if getattr(self.client.driver_for(d), "keeps_state", False):
+                continue  # e.g. a network light: it remembers its own colour / scene / power
             mode = d.current_mode
             try:
                 if mode.has_per_led:
@@ -2797,6 +2887,35 @@ def run_headless_effect(client: LocalBackend, snap: dict) -> int:
         return 0
 
 
+def apply_theme(app: QApplication):
+    """Dark look everywhere. The stylesheet only paints the main window; dialogs, menus and tooltips take
+    their background from the palette, which on a light desktop theme (Windows' default) would leave the
+    stylesheet's light text on a white dialog."""
+    app.setStyle("Fusion")
+    pal = QPalette()
+    text, field, card = QColor("#e8e9ee"), QColor("#262a35"), QColor("#1b1d24")
+    for role, col in (
+        (QPalette.Window, card),
+        (QPalette.WindowText, text),
+        (QPalette.Base, field),
+        (QPalette.AlternateBase, card),
+        (QPalette.Text, text),
+        (QPalette.Button, field),
+        (QPalette.ButtonText, text),
+        (QPalette.ToolTipBase, field),
+        (QPalette.ToolTipText, text),
+        (QPalette.Highlight, QColor(ACCENT)),
+        (QPalette.HighlightedText, QColor("#ffffff")),
+        (QPalette.PlaceholderText, QColor("#7d8398")),
+        (QPalette.Link, QColor("#9385ff")),
+    ):
+        pal.setColor(role, col)
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        pal.setColor(QPalette.Disabled, role, QColor("#666c7d"))
+    app.setPalette(pal)
+    app.setStyleSheet(QSS)
+
+
 def app_icon_path() -> Optional[Path]:
     data = Path(__file__).resolve().parent / "data"
     for name in ("rgbdeck.ico", "rgbdeck.svg") if IS_WINDOWS else ("rgbdeck.svg", "rgbdeck.ico"):
@@ -2827,7 +2946,7 @@ def selftest() -> int:
     app = QApplication.instance() or QApplication([])
     pix_ok = icon is not None and not QIcon(str(icon)).pixmap(32, 32).isNull()
     log.info("selftest: icon renders: %s · platform %s · Qt %s", pix_ok, app.platformName(), QT_VERSION_STR)
-    ok = len(mods) >= 9 and pix_ok and hid_ok
+    ok = len(mods) >= 10 and pix_ok and hid_ok
     log.info("selftest: %s", "OK" if ok else "FAILED")
     print("selftest", "OK" if ok else "FAILED")
     return 0 if ok else 1
@@ -2870,8 +2989,7 @@ def main(argv: List[str]) -> int:
     app = QApplication([a for a in argv if a not in ("--tray", "--verbose", "-v")])
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName("rgbdeck")
-    app.setStyle("Fusion")
-    app.setStyleSheet(QSS)
+    apply_theme(app)
     icon_path = app_icon_path()
     if icon_path:
         app.setWindowIcon(QIcon(str(icon_path)))

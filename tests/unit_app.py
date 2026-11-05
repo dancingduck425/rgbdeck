@@ -94,8 +94,10 @@ def kb_modes():
 uniform = FakeDriver("Uniform board", ["Key: A", "Key: B", "Key: C", "Indicator: Caps Lock"], kb_modes())
 painted = FakeDriver("Painted board", ["Key: A", "Key: B", "Key: C"], kb_modes())
 fx = FakeDriver("Effect board", ["Key: A", "Key: B"], kb_modes())
+room = FakeDriver("Room light", ["Light"], kb_modes())  # like a network light: remembers its state, has no keys
+room.keeps_state = room.follows_typing = True
 mod = types.ModuleType("rgbdeck.hw.fake")
-mod.probe = lambda: [uniform, painted, fx]
+mod.probe = lambda: [uniform, painted, fx, room]
 mod.USB_IDS = []
 backend.discover_drivers = lambda: [mod]
 backend.hidraw.enumerate_hid = lambda *a, **k: []
@@ -110,7 +112,10 @@ client = backend.LocalBackend()
 w = app_mod.MainWindow(client)
 client.refresh()
 w._scan_done()
-check([d.name for d in client.devices] == ["Uniform board", "Painted board", "Effect board"], "fake devices adopted")
+check(
+    [d.name for d in client.devices] == ["Uniform board", "Painted board", "Effect board", "Room light"],
+    "fake devices adopted",
+)
 
 # set up looks: one color everywhere (indicator dark) / per-key / an onboard effect
 orange = rgb_to_u32(255, 106, 0)
@@ -120,7 +125,44 @@ m = client.devices[2].modes[2]
 m.colors = [rgb_to_u32(0, 0, 255)]
 client.update_mode(client.devices[2], m)
 client.wait_idle()
+blue = rgb_to_u32(0, 0, 255)
+client.update_leds(client.devices[3], [blue])
+client.wait_idle()
 w.base_colors = {d.index: list(d.colors) for d in client.devices}
+
+# a typing effect on the keyboard makes the room light flash toward the key's color, then fall back
+from rgbdeck.effects import EffectEngine  # noqa: E402
+
+kbd = client.devices[1]
+w.engine = EffectEngine({0: (0, 0), 1: (1, 0), 2: (2, 0)}, {"A": 0, "B": 1, "C": 2}, lambda: (255, 0, 0))
+w.engine.settings.kind = "glow"
+w.engine.background = list(kbd.colors)
+w.engine_dev, w.engine_kind = kbd, "glow"
+before_writes = len(room.writes)
+w._fx_tick()
+client.wait_idle()
+check(len(room.writes) == before_writes, "no key pressed: the room light is left alone")
+w.engine.key_pressed("A")
+w._fx_tick()
+client.wait_idle()
+r, g, b = room.writes[-1][0] & 0xFF, room.writes[-1][0] >> 8 & 0xFF, room.writes[-1][0] >> 16 & 0xFF
+check(r > 150 and b < 100, f"key press pulls the room light toward the effect color ({(r, g, b)})")
+w._stop_app_effect()
+client.wait_idle()
+check(room.writes[-1] == [blue], "stopping the effect gives the room light its own color back")
+w.base_colors[3] = [0]
+w.engine = EffectEngine({0: (0, 0)}, {"A": 0}, lambda: (255, 0, 0))
+w.engine.settings.kind = "glow"
+w.engine.background = list(kbd.colors)
+w.engine_dev, w.engine_kind = kbd, "glow"
+n_writes = len(room.writes)
+w.engine.key_pressed("A")
+w._fx_tick()
+client.wait_idle()
+check(len(room.writes) == n_writes, "a light that is off is not switched on by typing")
+w._stop_app_effect()
+client.wait_idle()
+w.base_colors[3] = [blue]
 
 w._really_quit = True
 w.close()
@@ -130,6 +172,7 @@ check(
     f"uniform board stored as saved Static ({uniform.modes[-1:]})",
 )
 check(not any(m[0] == "Static" for m in painted.modes), "painted board left in per-key mode")
+check(not room.modes, f"a device that keeps its own state is not touched on close ({room.modes})")
 check(fx.modes[-1][:2] == ("Breathing", True), f"running effect re-sent with save=True ({fx.modes[-1:]})")
 presets = app_mod.load_json(app_mod.PRESETS_FILE, {})
 check(app_mod.LAST_LOOK in presets, "'Last look' preset written")
