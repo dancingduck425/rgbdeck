@@ -101,6 +101,8 @@ def _config() -> dict:
                 "enabled": bool(data.get("enabled", DEFAULT_ENABLED)),
                 "manual": [str(ip) for ip in data.get("manual", []) if _valid_ip(str(ip))],
                 "known": {str(k): dict(v) for k, v in (data.get("known") or {}).items() if isinstance(v, dict)},
+                # address -> MAC of Govee hardware a network search came across (names the entry in the panel)
+                "seen": {str(k): str(v) for k, v in (data.get("seen") or {}).items() if _valid_ip(str(k))},
             }
         return _cfg
 
@@ -209,6 +211,165 @@ def rescan():
         _lan.scan()
 
 
+# MAC prefixes registered to Shenzhen Intellirocks Tech (Govee) in the IEEE registry. Older lights carry
+# their Wi-Fi module maker's prefix instead, so this recognises many Govee devices, not all.
+GOVEE_OUIS = ("5c:e7:53", "d4:13:68", "d4:ad:fc", "e0:2a:25")
+SWEEP_MAX_HOSTS = 1024  # a bigger network is searched only in the /24 around this machine
+_VIRTUAL_IFACES = (
+    "lo",
+    "zt",
+    "tun",
+    "tap",
+    "wg",
+    "docker",
+    "br-",
+    "veth",
+    "virbr",
+    "waydroid",
+    "tailscale",
+    "vmnet",
+    "vboxnet",
+)
+
+
+def _sweepable(ip: str, mask: str) -> Optional[ipaddress.IPv4Network]:
+    try:
+        iface = ipaddress.ip_interface(f"{ip}/{mask}")
+    except ValueError:
+        return None
+    if not iface.ip.is_private or iface.ip.is_loopback or iface.ip.is_link_local:
+        return None  # only home / office LANs: never walk a public range
+    net = iface.network
+    if net.num_addresses > SWEEP_MAX_HOSTS:
+        net = ipaddress.ip_network(f"{ip}/24", strict=False)
+    return net
+
+
+def _local_networks() -> List[ipaddress.IPv4Network]:
+    """The LANs this machine sits on (physical interfaces only; VPN and container networks are left alone)."""
+    nets: List[Optional[ipaddress.IPv4Network]] = []
+    if sys.platform.startswith("linux"):
+        try:
+            import fcntl
+
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                for _idx, name in socket.if_nameindex():
+                    if name.startswith(_VIRTUAL_IFACES):
+                        continue
+                    ifr = struct.pack("256s", name.encode()[:15])
+                    try:  # SIOCGIFADDR, SIOCGIFNETMASK
+                        ip = socket.inet_ntoa(fcntl.ioctl(probe.fileno(), 0x8915, ifr)[20:24])
+                        mask = socket.inet_ntoa(fcntl.ioctl(probe.fileno(), 0x891B, ifr)[20:24])
+                    except OSError:
+                        continue
+                    nets.append(_sweepable(ip, mask))
+            finally:
+                probe.close()
+        except (ImportError, OSError):
+            pass
+    else:  # no portable way to read the netmask: assume the usual home /24
+        nets = [_sweepable(ip, "255.255.255.0") for ip in _local_ipv4()]
+    return list(dict.fromkeys(n for n in nets if n is not None))
+
+
+def _neighbors() -> Dict[str, str]:
+    """address -> MAC (aa:bb:cc:dd:ee:ff) of every host this machine has recently talked to (the ARP table)."""
+    out: Dict[str, str] = {}
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/net/arp") as f:
+                for line in f.readlines()[1:]:
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[3] != "00:00:00:00:00:00":
+                        out[parts[0]] = parts[3].lower()
+        else:
+            import re
+            import subprocess
+
+            flags = 0x08000000 if sys.platform == "win32" else 0  # no console window
+            text = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=5, creationflags=flags).stdout
+            pattern = r"(\d+\.\d+\.\d+\.\d+)\)?\s+(?:at\s+)?([0-9a-fA-F]{1,2}(?:[:-][0-9a-fA-F]{1,2}){5})"
+            for m in re.finditer(pattern, text):
+                out[m.group(1)] = ":".join(f"{int(x, 16):02x}" for x in re.split("[:-]", m.group(2)))
+    except Exception as e:  # noqa: BLE001 - a missing tool or odd output only costs the vendor hint
+        log.debug("could not read the neighbour table: %s", e)
+    return out
+
+
+def search_network(networks: Optional[List[ipaddress.IPv4Network]] = None, progress=None) -> dict:
+    """Walk the local network looking for Govee lights; blocks for seconds, so call it off the UI thread.
+
+    Every address gets the scan request directly, which finds lights where the router does not pass multicast
+    on. The ARP table then shows which hosts carry a Govee MAC: one of those that did not answer is a Govee
+    device with LAN Control switched off (or one whose answers are filtered). Those are kept on the list so
+    they connect by themselves once they start answering.
+
+    A /24 takes about two seconds. Bigger networks take longer (the OS resolves only a couple of hundred new
+    addresses at a time); progress(done, total) is called along the way.
+
+    Returns {"found": [(model, address)], "locked": [address], "blind": [address], "hosts": n}."""
+    cfg, lan = _config(), _lan
+    if not cfg["enabled"]:
+        cfg["enabled"] = True
+        _save_config()
+    lan.start()
+    t0 = time.monotonic()
+    lan.scan()
+    nets = list(networks) if networks is not None else _local_networks()
+    request = {"account_topic": "reserve"}
+    locked: List[str] = []
+    blind: List[str] = []
+    judged = set()
+
+    def note_govee_hardware():
+        """Hosts with a Govee MAC that are not answering: say why, and remember them."""
+        with lan.cv:
+            answering = {r.ip for r in lan.lights.values() if r.last_seen >= t0}
+        remembered = {v.get("ip") for v in cfg["known"].values()}
+        for ip, mac in sorted(_neighbors().items()):
+            if mac[:8] not in GOVEE_OUIS or ip in answering or ip in judged:
+                continue
+            try:
+                if not any(ipaddress.ip_address(ip) in net for net in nets):
+                    continue
+            except ValueError:
+                continue
+            judged.add(ip)
+            state = _reach(ip)
+            lan.reach[ip] = state
+            if state == "unreachable":
+                continue
+            cfg["seen"][ip] = mac
+            if ip not in cfg["manual"] and ip not in remembered:
+                cfg["manual"].append(ip)
+            (locked if state == "refused" else blind).append(ip)
+
+    note_govee_hardware()  # whatever the ARP table already holds shows up at once
+    total = sum(max(0, net.num_addresses - 2) for net in nets) or 1
+    hosts = 0
+    for net in nets:
+        for host in net.hosts():
+            lan.send(str(host), "scan", request, SCAN_PORT)
+            hosts += 1
+            time.sleep(0.002)
+            if progress is not None and hosts % 16 == 0:
+                progress(hosts, total)
+    time.sleep(1.2)  # answers, and address resolution for the stragglers
+    note_govee_hardware()
+    with lan.cv:
+        found = sorted((r.sku or "light", r.ip) for r in lan.lights.values() if r.last_seen >= t0)
+    answering = {ip for _sku, ip in found}
+    locked = [ip for ip in locked if ip not in answering]
+    blind = [ip for ip in blind if ip not in answering]
+    _save_config()
+    lan.last_scan = time.monotonic()
+    log.info(
+        "network search over %d addresses: answering %s, LAN Control off %s, silent %s", hosts, found, locked, blind
+    )
+    return {"found": found, "locked": locked, "blind": blind, "hosts": hosts}
+
+
 def forget(ip: str) -> bool:
     """Drop an address the user added and any remembered light at it; True if something was removed."""
     cfg = _config()
@@ -216,6 +377,7 @@ def forget(ip: str) -> bool:
     if ip not in cfg["manual"] and not gone:
         return False
     cfg["manual"] = [x for x in cfg["manual"] if x != ip]
+    cfg["seen"].pop(ip, None)
     for k in gone:
         del cfg["known"][k]
     with _lan.cv:
@@ -246,7 +408,8 @@ def status_report() -> List[dict]:
     for ip in cfg["manual"]:
         if ip not in listed:
             reach = lan.reach.get(ip, "checking")
-            rows.append({"name": "Light added by address", "ip": ip, "state": "blind" if reach == "quiet" else reach})
+            name = "Govee device" if ip in cfg["seen"] else "Light added by address"
+            rows.append({"name": name, "ip": ip, "state": "blind" if reach == "quiet" else reach})
             listed.add(ip)
     return rows
 
@@ -844,6 +1007,7 @@ __all__ = [
     "forget",
     "found_lights",
     "rescan",
+    "search_network",
     "status_report",
     "get_settings",
     "probe",

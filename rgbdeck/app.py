@@ -1505,6 +1505,8 @@ class LightsDialog(QDialog):
     """Network lights: what is connected, why something is not, how to connect one, add by address."""
 
     checked = Signal(str, str, str)  # address, verdict, model
+    searched = Signal(object)  # govee_lan.search_network() result
+    progressed = Signal(int)  # percent of the address sweep
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1532,6 +1534,15 @@ class LightsDialog(QDialog):
         self.enable.toggled.connect(self._toggle)
         lay.addWidget(self.enable)
 
+        self.search_btn = QPushButton("Search my network")
+        self.search_btn.setObjectName("primary")
+        self.search_btn.setToolTip(
+            "Asks every address on your local network whether it is a Govee light, and looks for Govee\n"
+            "hardware that has LAN Control switched off. Takes a few seconds."
+        )
+        self.search_btn.clicked.connect(self._search)
+        lay.addWidget(self.search_btn, 0, Qt.AlignLeft)
+
         card = QFrame()
         card.setObjectName("card")
         self.rows = QVBoxLayout(card)
@@ -1545,12 +1556,8 @@ class LightsDialog(QDialog):
         self.addr.returnPressed.connect(self._check)
         add.addWidget(self.addr, 1)
         self.check_btn = QPushButton("Check and add")
-        self.check_btn.setObjectName("primary")
         self.check_btn.clicked.connect(self._check)
         add.addWidget(self.check_btn)
-        again = QPushButton("Search again")
-        again.clicked.connect(self._search)
-        add.addWidget(again)
         lay.addLayout(add)
         self.result = QLabel("")
         self.result.setWordWrap(True)
@@ -1573,11 +1580,15 @@ class LightsDialog(QDialog):
         lay.addWidget(bb)
 
         self.checked.connect(self._checked)
+        self.searched.connect(self._searched)
+        self.progressed.connect(lambda pct: self.search_btn.setText(f"Searching… {pct}%"))
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
         self._timer.start(1000)
         govee_lan.rescan()
         self._refresh()
+        if self.enable.isChecked() and not any(r["state"] == "connected" for r in self._shown or []):
+            QTimer.singleShot(200, self._search)  # nothing connected: go and look without being asked
 
     # ---- list -------------------------------------------------------------------
     def _refresh(self):
@@ -1591,7 +1602,7 @@ class LightsDialog(QDialog):
                 item.widget().deleteLater()
         if not rows:
             empty = QLabel(
-                "No light found yet. Follow the steps below, then wait a moment or press “Search again”."
+                "No light found yet. Press “Search my network”, or follow the steps below first."
                 if self.enable.isChecked()
                 else "Not looking for lights. Switch it on above."
             )
@@ -1622,11 +1633,65 @@ class LightsDialog(QDialog):
         self._refresh()
 
     def _search(self):
-        if not self.enable.isChecked():
-            self.result.setText("Switch on “Look for Govee lights on my network” first.")
+        if not self.search_btn.isEnabled():
             return
-        govee_lan.rescan()
-        self.result.setText("Searching… lights that answer appear in the list within a few seconds.")
+        self.search_btn.setEnabled(False)
+        self.search_btn.setText("Searching…")
+        self.result.setText(
+            "Searching your network for Govee lights. A few seconds on most home networks, up to a quarter "
+            "of a minute on a large one."
+        )
+
+        def tick(done: int, total: int):
+            try:
+                self.progressed.emit(min(99, done * 100 // total))
+            except RuntimeError:
+                pass
+
+        def work():
+            try:
+                res = govee_lan.search_network(progress=tick)
+            except Exception as e:  # noqa: BLE001 - report it in the panel instead of dying silently
+                log.exception("network search failed")
+                res = {"error": str(e)}
+            try:
+                self.searched.emit(res)
+            except RuntimeError:
+                pass  # the panel was closed meanwhile
+
+        threading.Thread(target=work, name="rgbdeck-govee-search", daemon=True).start()
+
+    def _searched(self, res: dict):
+        self.search_btn.setEnabled(True)
+        self.search_btn.setText("Search my network")
+        self.enable.blockSignals(True)
+        self.enable.setChecked(govee_lan.get_settings()["enabled"])
+        self.enable.blockSignals(False)
+        self.changed = True
+        if res.get("error"):
+            self.result.setText(f"The search failed: {res['error']}")
+            return
+        parts = []
+        if res["found"]:
+            names = ", ".join(f"Govee {sku} at {ip}" for sku, ip in res["found"])
+            parts.append(f"Found {names}. It shows up as a device in a moment.")
+        if res["locked"]:
+            parts.append(
+                f"Found Govee hardware at {', '.join(res['locked'])} with <b>LAN Control switched off</b>. Switch it on "
+                "in the Govee Home app (the light, settings gear, LAN Control) and it connects by itself."
+            )
+        if res["blind"]:
+            parts.append(
+                f"Govee hardware at {', '.join(res['blind'])} takes commands but its answers do not arrive "
+                "(allow incoming UDP port 4002 in this PC's firewall). Colors are sent to it anyway."
+            )
+        if not parts:
+            parts.append(
+                f"No Govee device among the {res['hosts']} addresses of your network. Is the light powered and on "
+                "the same Wi-Fi as this PC? Bluetooth-only Govee lights can't be found this way."
+            )
+        self.result.setText(" ".join(parts))
+        self._refresh()
 
     def _remove(self, ip: str):
         if govee_lan.forget(ip):

@@ -52,8 +52,10 @@ open a device-support issue with your `lsusb` line.
    The **💡 Lights** button next to the device cards lists every light with its state and says what is wrong
    when one is not connected ("on your network, but LAN Control is off", "not reachable", …).
 3. If it doesn't show up: a firewall is probably dropping the light's answers. Allow incoming UDP port 4002
-   from your LAN (`sudo ufw allow proto udp from 192.168.0.0/16 to any port 4002`), or type the light's address
-   in the Lights panel, which checks it and works even without any answer coming back.
+   from your LAN (`sudo ufw allow proto udp from 192.168.0.0/16 to any port 4002`), or press **Search my network**
+   in the Lights panel. It asks every address on your LAN directly (no multicast needed), recognises Govee
+   hardware by its network card even when LAN Control is still off, and tells you which of the two it is.
+   You can also type an address there yourself.
 
 On Windows, looking for lights is off until you tick **Settings → Find Govee lights on my network**, because
 Windows then asks once whether RGB Deck may use your network.

@@ -366,6 +366,26 @@ check(
     gl.forget("127.0.0.1") and gl.status_report() == [] and not gl.forget("127.0.0.1"),
     "forget removes the address and the light",
 )
+
+# --- searching the network: every address is asked directly (no multicast needed)
+import ipaddress  # noqa: E402
+
+loop = [ipaddress.ip_network("127.0.0.0/30")]
+real_neighbors = gl._neighbors
+gl._neighbors = lambda: {}
+res = gl.search_network(loop)
+check(res["found"] == [("H618F", "127.0.0.1")] and res["hosts"] == 2, f"search finds the answering light ({res})")
+check(
+    gl.status_report() == [{"name": "Govee H618F", "ip": "127.0.0.1", "state": "connected"}],
+    "and it is listed as connected",
+)
+gl.forget("127.0.0.1")
+nets = gl._local_networks()
+check(
+    all(n.num_addresses <= gl.SWEEP_MAX_HOSTS and n.is_private for n in nets),
+    f"only private LANs of bounded size are searched ({nets})",
+)
+check(isinstance(real_neighbors(), dict), "neighbour table readable")
 light.answer = False
 
 # --- switched off in settings
@@ -391,11 +411,18 @@ gl.set_settings(True, [])
 gl._config()["known"].clear()
 gl._lan.lights.clear()
 check(gl.diagnose("127.0.0.1", wait=0.2) == ("refused", ""), "diagnose: something is there but refuses commands")
-gl.set_settings(True, ["127.0.0.1"])
+# a network search recognises it by its Govee MAC address and keeps it on the list
+gl._neighbors = lambda: {"127.0.0.1": "d4:13:68:00:00:01", "127.0.0.2": "aa:bb:cc:00:00:02"}
+res = gl.search_network(loop)
+check(res["found"] == [] and res["locked"] == ["127.0.0.1"], f"search: Govee hardware with LAN Control off ({res})")
+check(gl.get_settings()["manual"] == ["127.0.0.1"], "it is remembered, so it connects once the switch is on")
 client.refresh()
 check(client.devices == [], "an address that refuses commands is not shown as a device")
 rows = gl.status_report()
-check(len(rows) == 1 and rows[0]["state"] == "refused", f"status: refused ({rows})")
+check(
+    len(rows) == 1 and rows[0]["state"] == "refused" and rows[0]["name"] == "Govee device",
+    f"status: refused ({rows})",
+)
 check(not client.poll_notifications(), "and it does not cause rescans")
 
 client.shutdown()

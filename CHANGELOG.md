@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.2 — 2026-11-04
+
+- **Search my network** in the Lights panel (runs by itself when the panel opens and nothing is connected):
+  every address of the local network is asked directly, so lights are found where the router does not pass
+  multicast on, and nobody has to know an address. Govee hardware is also recognised by its MAC prefix, so a
+  light that has LAN Control switched off is listed as exactly that and connects by itself once it is on.
+  Only private networks are searched, at most 1024 addresses, never VPN or container interfaces.
+
 ## 1.3.1 — 2026-11-04
 
 - **Lights panel**: a 💡 Lights button next to the device cards (also File → Network lights…) lists every Govee
