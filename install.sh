@@ -44,7 +44,7 @@ case "$MODE" in
 exec python3 -c 'import sys; sys.path.insert(0, "$HERE"); from rgbdeck.app import main; sys.exit(main(sys.argv))' "\$@"
 EOF
     chmod +x "$BIN/rgbdeck"
-    sed "s|^Exec=.*|Exec=$BIN/rgbdeck|" "$HERE/rgbdeck/data/rgbdeck.desktop" > "$APPS/rgbdeck.desktop"
+    sed "s|^Exec=rgbdeck|Exec=$BIN/rgbdeck|" "$HERE/rgbdeck/data/rgbdeck.desktop" > "$APPS/rgbdeck.desktop"
     cp "$HERE/rgbdeck/data/rgbdeck.svg" "$ICONS/rgbdeck.svg"
     update-desktop-database "$APPS" 2>/dev/null || true
     install_udev

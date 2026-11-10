@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.5.0 — 2026-11-10
+
+- **Tray menu**: lights off / on, presets, animations, brightness.
+- **Commands**: `rgbdeck --toggle | --off | --on | --brightness N|+N|-N | --preset NAME | --next-preset |
+  --animate KIND|off | --color RRGGBB` act on the running app; they are desktop actions (KDE lists them under
+  Shortcuts). Windows: optional global shortcuts Ctrl+Alt+F9…F12 (untested on real Windows).
+- **Master brightness and lights off** sit on top of every look (painting, presets, animations, typing effects);
+  "off" keeps the look and brings it back, devices on an onboard effect are switched off and restored.
+- **Custom animations** (Animate → Customize…): exact speed, your own colors for wave / color cycle / aurora,
+  and which devices take part.
+- **Presets remember a running animation**, and "apply at login" plays it without the window.
+- Internals: every color now passes one output stage (`director.py`), which is also the single list of actions
+  for tray, command line and what comes next (automations, phone page).
+
 ## 1.4.0 — 2026-11-10
 
 - **Govee lights over Bluetooth.** A light in Bluetooth range that the LAN API does not reach (LAN Control off,

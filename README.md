@@ -17,6 +17,8 @@ background daemon, no third-party RGB software.
 - **Govee lights** over Wi-Fi or Bluetooth: color, per-segment painting, whites, built-in scenes, and a pulse on
   every key press while a typing effect runs. **WLED** strips are found on the network by themselves.
 - **Presets**, apply-at-login, tray icon, single instance.
+- **Control from anywhere**: the tray menu has presets, animations, brightness and lights off/on, and the same
+  actions are commands you can bind to keys (`rgbdeck --toggle`, `--next-preset`, `--brightness +10`, …).
 - **Close it and the colors stay**: on exit the look is stored in each device's own memory (single color or
   onboard effect), and multi-color key layouts are re-applied at login. The app doesn't need to keep running
   unless you use a typing effect.
@@ -81,6 +83,22 @@ its address into the Lights panel. A long strip is offered as 30 paintable LEDs 
 **LED count** up to the real number if you want every LED. Colors are streamed with WLED's realtime protocol, so
 the strip goes back to its own effect a few seconds after RGB Deck stops sending (pick "WLED's own effect" to do
 that on purpose); on exit the current look is written into WLED so it stays.
+
+### Commands and shortcuts
+
+With RGB Deck running (the tray is enough), these talk to it:
+
+| Command | Does |
+|---|---|
+| `rgbdeck --toggle` / `--off` / `--on` | All lights off, and back to exactly what they showed |
+| `rgbdeck --brightness 60` / `+10` / `-10` | Overall brightness on top of every look |
+| `rgbdeck --preset NAME` / `--next-preset` | Apply a preset / step through them |
+| `rgbdeck --animate wave` / `off` | Start an animation (`wave cycle breathe aurora fire twinkle`) or stop it |
+| `rgbdeck --color ff8800` | One color on everything |
+
+On KDE they appear under *System Settings → Shortcuts → RGB Deck* (they are desktop actions); on other desktops
+bind the commands yourself. On Windows tick **Settings → Global shortcuts** for Ctrl+Alt+F9 (lights off/on),
+F10 (next preset), F11 / F12 (dimmer / brighter).
 
 ## Install
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import colorsys
 import glob
+import logging
 import math
 import os
 import random
@@ -21,6 +22,8 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
+
+log = logging.getLogger("rgbdeck.effects")
 
 from rgbdeck.models import rgb_to_u32, u32_to_rgb
 
@@ -448,6 +451,46 @@ class WindowsKeyListener(threading.Thread):
 
 
 KeyListener = WindowsKeyListener if sys.platform == "win32" else EvdevKeyListener
+
+
+class WindowsHotkeys(threading.Thread):
+    """Global shortcuts on Windows (RegisterHotKey): Ctrl+Alt+F9 lights off/on, F10 next preset, F11 dimmer,
+    F12 brighter. on_command gets the Director command; it is called from this thread.
+    Linux desktops bind the same commands themselves (rgbdeck --toggle ...; they are Desktop Actions)."""
+
+    KEYS = ((0x78, "toggle"), (0x79, "next-preset"), (0x7A, "brightness -10"), (0x7B, "brightness +10"))
+
+    def __init__(self, on_command: Callable[[str], None]):
+        super().__init__(name="rgbdeck-hotkeys", daemon=True)
+        self._on_command = on_command
+        self._tid = 0
+        self.registered = 0
+
+    def run(self):
+        import ctypes
+        from ctypes import wintypes
+
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+        self._tid = kernel32.GetCurrentThreadId()
+        mod_ctrl_alt_norepeat = 0x0002 | 0x0001 | 0x4000
+        for i, (vk, _cmd) in enumerate(self.KEYS):
+            if user32.RegisterHotKey(None, i + 1, mod_ctrl_alt_norepeat, vk):
+                self.registered += 1
+        msg = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if msg.message == 0x0312 and 1 <= msg.wParam <= len(self.KEYS):  # WM_HOTKEY
+                try:
+                    self._on_command(self.KEYS[msg.wParam - 1][1])
+                except Exception:  # noqa: BLE001
+                    log.exception("hotkey handler failed")
+        for i in range(len(self.KEYS)):
+            user32.UnregisterHotKey(None, i + 1)
+
+    def stop(self):
+        if self._tid:
+            import ctypes
+
+            ctypes.windll.user32.PostThreadMessageW(self._tid, 0x0012, 0, 0)  # WM_QUIT
 
 
 @dataclass

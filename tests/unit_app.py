@@ -173,7 +173,7 @@ w.base_colors[3] = [0]  # the room light is off
 w._set_animation("wave", 80)
 client.wait_idle()
 check(
-    w._anim_timer.isActive() and w.settings["animation"] == {"kind": "wave", "speed": 80},
+    w._anim_timer.isActive() and w.settings["animation"] == {"kind": "wave", "speed": 80, "palette": [], "skip": []},
     "animation runs and is remembered",
 )
 check(len(set(painted.writes[-1])) == 3, f"wave: the keys show different colors ({painted.writes[-1]})")
@@ -214,6 +214,106 @@ check(room.writes[-1] == [blue] and w.settings["animation"]["kind"] is None, "ro
 w._set_animation("cycle")
 w._everything_off()
 check(w._anim_kind is None, "All off stops the animation")
+client.wait_idle()
+
+# own colors, devices sitting out, presets that bring an animation back
+client.update_mode(client.devices[1], client.devices[1].modes[0])
+client.update_mode(client.devices[2], client.devices[2].modes[0])
+w.base_colors[1] = list(painted_before)
+w._anim_palette = [rgb_to_u32(255, 0, 0), rgb_to_u32(0, 0, 255)]
+w._anim_skip = {"Effect board"}
+fx_writes = len(fx.writes)
+w._set_animation("wave", 50)
+w._anim_tick()
+client.wait_idle()
+check(all(c & 0x00FF00 == 0 for c in painted.writes[-1]), f"own colors: only reds and blues ({painted.writes[-1]})")
+check(len(fx.writes) == fx_writes, "a device taken out of the animation is left alone")
+w.presets["Party"] = w._snapshot()
+check(w.presets["Party"]["animation"]["kind"] == "wave", "a preset remembers the running animation")
+w._set_animation(None)
+w._anim_palette, w._anim_skip = [], set()
+w._apply_preset("Party")
+check(
+    w._anim_kind == "wave" and len(w._anim_palette) == 2 and w._anim_skip == {"Effect board"},
+    "applying the preset brings the animation back, colors and devices included",
+)
+w._set_animation(None)
+w._anim_palette, w._anim_skip = [], set()
+w.presets.pop("Party")
+client.wait_idle()
+
+# the director: master brightness, lights off / on, flash, text commands
+d = w.director
+w.base_colors[1] = list(painted_before)
+d.send(client.devices[1], painted_before)
+d.set_master(50)
+client.wait_idle()
+check(
+    painted.writes[-1] == [rgb_to_u32(128, 0, 0), rgb_to_u32(0, 128, 0), rgb_to_u32(0, 0, 128)],
+    "master 50 % halves every color",
+)
+check(w.settings.get("master") == 50, "master brightness is remembered")
+client.update_mode(client.devices[2], client.devices[2].modes[2])  # an onboard effect
+client.wait_idle()
+check(d.command("toggle") == "ok lights off" and d.dark, "toggle: lights off")
+client.wait_idle()
+check(painted.writes[-1] == [0, 0, 0], "per-key device goes dark")
+check(
+    fx.device.current_mode.name != "Breathing" or fx.device.mode_named("Off") is None,
+    "a device on an onboard effect is switched off where it can",
+)
+d.send(client.devices[1], painted_before)
+client.wait_idle()
+check(painted.writes[-1] == [0, 0, 0], "nothing lights up while the lights are off")
+check(d.command("on") == "ok lights on", "on")
+client.wait_idle()
+check(
+    painted.writes[-1][0] == rgb_to_u32(128, 0, 0) and fx.device.current_mode.name == "Breathing",
+    "the look comes back, onboard effect too",
+)
+check(
+    d.command("brightness +50") == "ok brightness 100" and d.command("brightness 300") == "ok brightness 100",
+    "brightness is clamped",
+)
+d.flash((255, 255, 255), 1)
+client.wait_idle()
+time.sleep(0.25)
+d._flash_tick()
+client.wait_idle()
+check(painted.writes[-1][1] != painted_before[1], f"flash pulls the colors toward white ({painted.writes[-1]})")
+time.sleep(0.35)
+d._flash_tick()
+client.wait_idle()
+check(painted.writes[-1] == painted_before and not d._flash_timer.isActive(), "and leaves the look as it was")
+w.presets["One"], w.presets["Two"] = w._snapshot(), w._snapshot()
+check(d.command("next-preset") == "ok preset One" and d.command("next-preset") == "ok preset Two", "next-preset cycles")
+check(
+    d.command("preset Nope").startswith("no ") and d.command("animate nope").startswith("no "),
+    "unknown names are refused",
+)
+check(
+    d.command("animate cycle 30") == "ok animate cycle" and w._anim_kind == "cycle" and w._anim_speed == 30,
+    "animate by command",
+)
+check(d.command("animate off") == "ok animate off" and w._anim_kind is None, "animate off")
+check(d.command("color 00ff00") == "ok color 00FF00", "color by command")
+w._flush()
+client.wait_idle()
+check(painted.writes[-1] == [rgb_to_u32(0, 255, 0)] * 3, "and every device takes it")
+state = d.state()
+check(
+    state["presets"] == ["One", "Two"] and state["master"] == 100 and not state["dark"],
+    f"state for menus and pages ({str(state)[:60]})",
+)
+check(d.command("nonsense") == "unknown command", "unknown command")
+check(app_mod.remote_command(["rgbdeck", "--brightness", "+10"]) == "brightness +10", "command line: --brightness +10")
+check(
+    app_mod.remote_command(["rgbdeck", "--toggle"]) == "toggle" and app_mod.remote_command(["rgbdeck"]) is None,
+    "command line: --toggle",
+)
+w.presets.pop("One")
+w.presets.pop("Two")
+w._last_preset = None
 client.wait_idle()
 # put the looks back the way the close tests below expect them
 client.update_leds(client.devices[0], [orange, orange, orange, 0])

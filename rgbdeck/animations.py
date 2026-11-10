@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import colorsys
 import math
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from rgbdeck.models import rgb_to_u32, u32_to_rgb
 
@@ -26,6 +26,7 @@ KINDS: List[Tuple[str, str, str]] = [
     ("twinkle", "Starlight", "Your colors dimmed, with stars glinting across them"),
 ]
 NAMES = {k: label for k, label, _tip in KINDS}
+USES_PALETTE = ("wave", "cycle", "aurora")
 TAU = 2 * math.pi
 
 
@@ -51,16 +52,38 @@ def rate(speed: int) -> float:
     return 0.03 * (40.0 ** (max(1, min(100, speed)) / 100.0))
 
 
+def gradient(palette: Sequence[int], pos: float) -> int:
+    """Color at pos (wraps around at 1.0) on a ring through the palette's colors."""
+    k = len(palette)
+    if k == 1:
+        return palette[0]
+    f = (pos % 1.0) * k
+    i = int(f) % k
+    a, b = u32_to_rgb(palette[i]), u32_to_rgb(palette[(i + 1) % k])
+    w = f - int(f)
+    w = w * w * (3 - 2 * w)  # ease in and out of each color
+    return rgb_to_u32(*(int(x + (y - x) * w + 0.5) for x, y in zip(a, b)))
+
+
 def render(
-    kind: str, t: float, xs: Sequence[float], ys: Sequence[float], base: Sequence[int], speed: int = 50
+    kind: str,
+    t: float,
+    xs: Sequence[float],
+    ys: Sequence[float],
+    base: Sequence[int],
+    speed: int = 50,
+    palette: Optional[Sequence[int]] = None,
 ) -> List[int]:
-    """One frame: a color per LED. base = the device's own colors (some animations build on them)."""
+    """One frame: a color per LED. base = the device's own colors (some animations build on them);
+    palette = the user's own colors for wave / cycle / aurora instead of the rainbow."""
     n = len(xs)
     w = rate(speed)
     if kind == "wave":
+        if palette:
+            return [gradient(palette, xs[i] * 0.85 - t * w) for i in range(n)]
         return [_hsv(xs[i] * 0.85 - t * w, 1.0, 1.0) for i in range(n)]
     if kind == "cycle":
-        c = _hsv(t * w * 0.5, 1.0, 1.0)
+        c = gradient(palette, t * w * 0.5) if palette else _hsv(t * w * 0.5, 1.0, 1.0)
         return [c] * n
     if kind == "breathe":
         k = 0.06 + 0.94 * (0.5 - 0.5 * math.cos(TAU * t * w)) ** 1.6
@@ -76,6 +99,9 @@ def render(
                 + 0.10 * math.sin(TAU * (x * 2.1 - t * w * 0.13) + y * 2.0)
             )
             val = 0.55 + 0.45 * math.sin(TAU * (x * 0.7 - t * w * 0.17) + y * 1.5 + math.sin(t * w * 0.9))
+            if palette:
+                out.append(_scaled(gradient(palette, (hue - 0.15) * 1.8), 0.12 + 0.88 * max(0.0, val)))
+                continue
             out.append(_hsv(hue, 0.85, 0.12 + 0.88 * max(0.0, val)))
         return out
     if kind == "fire":

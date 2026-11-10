@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QColorDialog,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -119,7 +120,14 @@ def setup_logging(verbose: bool):
 from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
 from rgbdeck.hw import govee_lan, wled  # noqa: E402
 from rgbdeck import animations  # noqa: E402
-from rgbdeck.effects import EffectEngine, EffectSettings, KeyListener, find_keyboard_events  # noqa: E402
+from rgbdeck.director import Director  # noqa: E402
+from rgbdeck.effects import (  # noqa: E402
+    EffectEngine,
+    EffectSettings,
+    KeyListener,
+    WindowsHotkeys,
+    find_keyboard_events,
+)
 
 APP_NAME = "RGB Deck"
 CONFIG_DIR = _config_root() / "rgbdeck"
@@ -1791,6 +1799,132 @@ class LightsDialog(QDialog):
         self._refresh()
 
 
+class AnimateDialog(QDialog):
+    """Fine control over the animation: which one, exact speed, own colors, which devices take part.
+    Every change applies at once."""
+
+    def __init__(self, w: "MainWindow"):
+        super().__init__(w)
+        self.w = w
+        self.setWindowTitle("Animate")
+        self.setMinimumWidth(460)
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+        head = QLabel("✨  Animations on all your devices")
+        head.setObjectName("devTitle")
+        lay.addWidget(head)
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        self.chips: Dict[Optional[str], QToolButton] = {}
+        group = QButtonGroup(self)
+        for i, (kind, label, tip) in enumerate([(None, "Off", "Back to your own colors")] + animations.KINDS):
+            b = QToolButton()
+            b.setObjectName("chip")
+            b.setCheckable(True)
+            b.setText(label)
+            b.setToolTip(tip)
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            b.setChecked(kind == w._anim_kind)
+            b.clicked.connect(lambda _c=False, k=kind: self.w._set_animation(k))
+            group.addButton(b)
+            grid.addWidget(b, i // 4, i % 4)
+            self.chips[kind] = b
+        lay.addLayout(grid)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Speed"))
+        self.speed = QSlider(Qt.Horizontal)
+        self.speed.setRange(1, 100)
+        self.speed.setValue(w._anim_speed)
+        self.speed.valueChanged.connect(lambda v: self.w._set_animation(self.w._anim_kind, v))
+        row.addWidget(self.speed, 1)
+        lay.addLayout(row)
+        self.own = QCheckBox("Use my own colors instead of the rainbow (wave, color cycle, aurora)")
+        self.own.setChecked(bool(w._anim_palette))
+        self.own.toggled.connect(self._palette_changed)
+        lay.addWidget(self.own)
+        self.palette_row = QHBoxLayout()
+        self.palette_row.setSpacing(6)
+        self.colors: List[int] = list(w._anim_palette) or [0x7C6CFF, 0x00B4FF, 0xFF4FD8]
+        lay.addLayout(self.palette_row)
+        self._build_palette()
+        lay.addWidget(QLabel("Devices that take part"))
+        self.dev_checks: Dict[str, QCheckBox] = {}
+        for d in w.client.devices:
+            if not d.led_names or w._per_led_mode(d) is None:
+                continue
+            c = QCheckBox(d.name)
+            c.setChecked(d.name not in w._anim_skip)
+            c.toggled.connect(self._devices_changed)
+            lay.addWidget(c)
+            self.dev_checks[d.name] = c
+        hint = QLabel(
+            "A room light that is switched off stays off. Devices without live per-LED control (some mice) "
+            "can't take part. Save a preset while an animation runs and the preset brings it back."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("hint")
+        lay.addWidget(hint)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(self.accept)
+        lay.addWidget(bb)
+
+    def _build_palette(self):
+        while self.palette_row.count():
+            item = self.palette_row.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for i, col in enumerate(self.colors):
+            sw = Swatch(u32_to_qcolor(col), 30)
+            sw.setEnabled(self.own.isChecked())
+            sw.clicked.connect(lambda _c=False, n=i: self._edit_color(n))
+            self.palette_row.addWidget(sw)
+        for text, fn, ok in (
+            ("+", self._add_color, len(self.colors) < 6),
+            ("−", self._drop_color, len(self.colors) > 2),
+        ):
+            b = QPushButton(text)
+            b.setFixedWidth(34)
+            b.setEnabled(ok and self.own.isChecked())
+            b.clicked.connect(fn)
+            self.palette_row.addWidget(b)
+        self.palette_row.addStretch(1)
+
+    def _edit_color(self, n: int):
+        c = QColorDialog.getColor(u32_to_qcolor(self.colors[n]), self, "Animation color")
+        if c.isValid():
+            self.colors[n] = qcolor_to_u32(c)
+            self._palette_changed()
+
+    def _add_color(self):
+        self.colors.append(qcolor_to_u32(self.w.color_panel.color()))
+        self._palette_changed()
+
+    def _drop_color(self):
+        self.colors.pop()
+        self._palette_changed()
+
+    def _palette_changed(self, *_a):
+        self.w._anim_palette = list(self.colors) if self.own.isChecked() else []
+        self._build_palette()
+        self._store()
+
+    def _devices_changed(self, *_a):
+        w = self.w
+        w._anim_skip = {name for name, c in self.dev_checks.items() if not c.isChecked()}
+        for d in w.client.devices:  # a device that just left the animation gets its own colors back
+            if d.name in w._anim_skip and d.index in w._anim_touched:
+                w._anim_touched.discard(d.index)
+                try:
+                    w.director.send(d, w._shown_base(d))
+                except DeviceError:
+                    pass
+        self._store()
+
+    def _store(self):
+        self.w.settings["animation"] = self.w._animation_dict()
+        save_json(SETTINGS_FILE, self.w.settings)
+
+
 class SettingsDialog(QDialog):
     def __init__(self, settings: dict, parent=None):
         super().__init__(parent)
@@ -1820,6 +1954,20 @@ class SettingsDialog(QDialog):
         self.follow.setChecked(settings.get("fx_follow", True))
         self.follow.setToolTip("While a typing effect runs on the keyboard, network lights flash with every key press.")
         form.addRow("", self.follow)
+        self.hotkeys = QCheckBox(
+            "Global shortcuts: Ctrl+Alt+F9 lights off/on, F10 next preset, F11 dimmer, F12 brighter"
+        )
+        self.hotkeys.setChecked(settings.get("hotkeys", False))
+        if IS_WINDOWS:
+            form.addRow("Shortcuts", self.hotkeys)
+        else:
+            sc = QLabel(
+                "Bind keys in your desktop's shortcut settings to: rgbdeck --toggle, --next-preset, "
+                "--brightness +10 / -10, --animate wave|off, --preset NAME (KDE lists them under RGB Deck)."
+            )
+            sc.setWordWrap(True)
+            sc.setObjectName("hint")
+            form.addRow("Shortcuts", sc)
         net = govee_lan.get_settings()
         self.network_changed = False
         self.govee = QCheckBox("Find Govee lights on my network")
@@ -1860,6 +2008,7 @@ class SettingsDialog(QDialog):
         self.settings["fx_fps"] = self.fps.value()
         self.settings["keep_on_close"] = self.keep.isChecked()
         self.settings["fx_follow"] = self.follow.isChecked()
+        self.settings["hotkeys"] = self.hotkeys.isChecked()
         ips = [x for x in self.govee_ips.text().replace(";", ",").replace(" ", ",").split(",") if x]
         self.network_changed = govee_lan.set_settings(self.govee.isChecked(), ips)
         try:
@@ -1872,8 +2021,44 @@ class SettingsDialog(QDialog):
 # =============================================================================
 # Main window
 # =============================================================================
+class _DirectorHost:
+    """What the Director needs from the window (see director.py)."""
+
+    def __init__(self, w: "MainWindow"):
+        self.w = w
+
+    def presets(self) -> List[str]:
+        return sorted(self.w.presets)
+
+    def current_preset(self) -> Optional[str]:
+        return self.w._last_preset
+
+    def apply_preset(self, name: str):
+        self.w._apply_preset(name)
+
+    def animation(self):
+        return self.w._anim_kind, self.w._anim_speed
+
+    def set_animation(self, kind: Optional[str], speed: Optional[int] = None):
+        self.w._set_animation(kind, speed)
+
+    def apply_color(self, rgb):
+        w = self.w
+        if w._anim_kind:
+            w._set_animation(None)
+        for d in w.client.devices:
+            w._apply_color_to_device(d, QColor(*rgb))
+
+    def all_off(self):
+        self.w._everything_off()
+
+    def shown_base(self, dev: Device) -> List[int]:
+        return self.w._shown_base(dev)
+
+
 class MainWindow(QMainWindow):
     scanFinished = Signal()
+    hotkeyPressed = Signal(str)
 
     def __init__(self, client: LocalBackend):
         super().__init__()
@@ -1905,8 +2090,14 @@ class MainWindow(QMainWindow):
         self.listener: Optional[KeyListener] = None
         self._fx_timer = QTimer(self)
         self._fx_timer.timeout.connect(self._fx_tick)
+        self.director = Director(client, _DirectorHost(self), self)
+        self.director.master = max(5, min(100, int(self.settings.get("master", 100))))
+        self.director.changed.connect(self._director_changed)
+        self._last_preset: Optional[str] = None
         self._anim_kind: Optional[str] = None  # animation playing on all devices (animations.KINDS)
         self._anim_speed = 50
+        self._anim_palette: List[int] = []  # the user's colors for wave / cycle / aurora (empty: rainbow)
+        self._anim_skip: Set[str] = set()  # names of devices that sit animations out
         self._anim_t0 = time.monotonic()
         self._anim_pos: Dict[int, tuple] = {}  # device index -> normalised LED positions
         self._anim_touched: Set[int] = set()
@@ -1917,6 +2108,9 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_tray()
         self._start_control_socket()
+        self._hotkeys: Optional[WindowsHotkeys] = None
+        self.hotkeyPressed.connect(self.director.command)
+        self._apply_hotkey_setting()
         self._build_menu()
         self.color_panel.set_palette(self.settings.get("palette", []))
         self.sync_chk.setChecked(self.settings.get("sync", True))
@@ -1969,6 +2163,10 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _c=False, v=value: self._set_animation(self._anim_kind, v))
             speeds.addAction(a)
             self.anim_speeds[value] = a
+        self.anim_menu.addSeparator()
+        a = self.anim_menu.addAction("Customize…")
+        a.setToolTip("Exact speed, your own colors, and which devices take part")
+        a.triggered.connect(self._customize_animation)
         self.anim_menu.setToolTipsVisible(True)
         self.anim_btn.setMenu(self.anim_menu)
         top.addWidget(self.anim_btn)
@@ -2400,7 +2598,7 @@ class MainWindow(QMainWindow):
                     self.engine.background = out  # effect renders on top of the new colors
                     self._fx_last_frame = None
                 else:
-                    self.client.update_leds(d, out)
+                    self.director.send(d, out)
                 if d is self.dev:
                     self.canvas.set_colors(out)
             self._pending_leds.clear()
@@ -2616,7 +2814,7 @@ class MainWindow(QMainWindow):
                 self.client.update_mode(d, off)
             elif d.led_names and self._per_led_mode(d):
                 self.client.update_mode(d, self._per_led_mode(d))
-                self.client.update_leds(d, [0] * len(d.colors))
+                self.director.send(d, [0] * len(d.colors))
         if self.dev:
             self._select_device(self.dev.index)
 
@@ -2675,7 +2873,7 @@ class MainWindow(QMainWindow):
             self.engine = None
             self.engine_dev = self.engine_kind = None
             try:
-                self.client.update_leds(d, base)  # back to the plain colors
+                self.director.send(d, base)  # back to the plain colors
             except DeviceError:
                 pass
             if d is self.dev:
@@ -2709,7 +2907,7 @@ class MainWindow(QMainWindow):
             return
         self._fx_last_frame = frame
         try:
-            self.client.update_leds(self.engine_dev, frame)
+            self.director.send(self.engine_dev, frame)
         except DeviceError as e:
             self.statusBar().showMessage(f"Lost connection: {e}")
             self._stop_app_effect()
@@ -2728,7 +2926,7 @@ class MainWindow(QMainWindow):
         was = self._anim_kind
         self._anim_kind = kind
         if remember:
-            self.settings["animation"] = {"kind": kind, "speed": self._anim_speed}
+            self.settings["animation"] = self._animation_dict()
             save_json(SETTINGS_FILE, self.settings)
         self.anim_actions[kind].setChecked(True)
         near = min(self.anim_speeds, key=lambda v: abs(v - self._anim_speed))
@@ -2752,11 +2950,29 @@ class MainWindow(QMainWindow):
             self.tray.setToolTip(f"{APP_NAME} — {animations.NAMES[kind]} running")
         self._anim_tick()
 
+    def _animation_dict(self) -> dict:
+        return {
+            "kind": self._anim_kind,
+            "speed": self._anim_speed,
+            "palette": list(self._anim_palette),
+            "skip": sorted(self._anim_skip),
+        }
+
+    def _load_animation(self, saved: dict, remember: bool = False):
+        """Take over a stored animation (settings or a preset) and start it if it names one."""
+        self._anim_palette = [int(c) & 0xFFFFFF for c in (saved.get("palette") or [])][:6]
+        self._anim_skip = {str(n) for n in (saved.get("skip") or [])}
+        self._anim_pos.clear()
+        self._set_animation(saved.get("kind"), saved.get("speed", 50), remember=remember)
+
+    def _customize_animation(self):
+        AnimateDialog(self).exec()
+
     def _anim_devices(self) -> List[Device]:
         """Devices an animation may drive: per-LED capable, and not a room light that is switched off."""
         out = []
         for d in self.client.devices:
-            if not d.led_names or self._per_led_mode(d) is None:
+            if not d.led_names or self._per_led_mode(d) is None or d.name in self._anim_skip:
                 continue
             drv = self.client.driver_for(d)
             if d.current_mode.color_mode != MODE_COLORS_PER_LED:
@@ -2780,7 +2996,9 @@ class MainWindow(QMainWindow):
                         xs, ys = [0.5] * len(xs), [0.5] * len(ys)  # one color per frame is all it can keep up with
                     pos = self._anim_pos[d.index] = (xs, ys)
                 base = self.base_colors.get(d.index, list(d.colors))
-                frame = animations.render(self._anim_kind, t, pos[0], pos[1], base, self._anim_speed)
+                frame = animations.render(
+                    self._anim_kind, t, pos[0], pos[1], base, self._anim_speed, self._anim_palette or None
+                )
                 f = self.dim.get(d.index, 100) / 100.0
                 if f < 0.999:
                     frame = [rgb_to_u32(*(int(x * f + 0.5) for x in u32_to_rgb(c))) for c in frame]
@@ -2790,7 +3008,7 @@ class MainWindow(QMainWindow):
                     if self.engine.busy:
                         continue
                     self._fx_last_frame = None
-                self.client.update_leds(d, frame)
+                self.director.send(d, frame)
                 if d is self.dev:
                     self.canvas.set_colors(frame)
         except DeviceError as e:
@@ -2807,7 +3025,7 @@ class MainWindow(QMainWindow):
                 if self.engine and self.engine_dev is d:
                     self.engine.background = base
                     self._fx_last_frame = None
-                self.client.update_leds(d, base)
+                self.director.send(d, base)
             except DeviceError:
                 continue
             if d is self.dev:
@@ -2849,7 +3067,7 @@ class MainWindow(QMainWindow):
                 continue
             self._follow_last[d.index] = out
             try:
-                self.client.update_leds(d, out)
+                self.director.send(d, out)
             except DeviceError:
                 continue
             if d is self.dev:
@@ -2890,6 +3108,7 @@ class MainWindow(QMainWindow):
                 if self.engine and self.engine_dev
                 else None
             ),
+            "animation": self._animation_dict() if self._anim_kind else None,
         }
 
     def _refresh_presets(self):
@@ -2920,6 +3139,7 @@ class MainWindow(QMainWindow):
     def _apply_preset(self, name):
         if name in self.presets:
             snap = self.presets[name]
+            self._last_preset = name
             self._stop_app_effect()
             if self._anim_kind:
                 self._set_animation(None)  # a preset is a fixed look
@@ -2933,6 +3153,8 @@ class MainWindow(QMainWindow):
                 d = next((x for x in self.client.devices if x.name == fx.get("device")), None)
                 if d:
                     self._start_app_effect(d, fx.get("kind", "ripple"), EffectSettings.from_dict(fx))
+            if (snap.get("animation") or {}).get("kind"):
+                self._load_animation(snap["animation"], remember=True)
             if self.dev:
                 self._select_device(self.dev.index)
             self.statusBar().showMessage(f"Preset '{name}' applied", 3000)
@@ -3013,13 +3235,17 @@ class MainWindow(QMainWindow):
         self.base_colors = {d.index: list(d.colors) for d in self.client.devices}
         self.dim = {d.index: self.dim.get(d.index, 100) for d in self.client.devices}
         self._populate_devices()
+        self.director.forget()
         self._anim_pos.clear()
         self._anim_touched.clear()
         if self._anim_resume:
             self._anim_resume = False
             saved = self.settings.get("animation") or {}
+            self._anim_palette = [int(c) & 0xFFFFFF for c in (saved.get("palette") or [])][:6]
+            self._anim_skip = {str(n) for n in (saved.get("skip") or [])}
+            self._anim_speed = max(1, min(100, int(saved.get("speed", 50))))
             if saved.get("kind") and self.client.devices:
-                self._set_animation(saved.get("kind"), saved.get("speed", 50), remember=False)
+                self._set_animation(saved.get("kind"), None, remember=False)
         fx, self._scan_resume_fx = self._scan_resume_fx, None
         if fx:
             d = next((x for x in self.client.devices if x.name == fx[0]), None)
@@ -3073,6 +3299,7 @@ class MainWindow(QMainWindow):
             return
         self.settings.update(dlg.apply())
         save_json(SETTINGS_FILE, self.settings)
+        self._apply_hotkey_setting()
         self.sync_chk.setChecked(self.settings.get("sync", True))
         if self.engine:
             self.engine.settings.fps = int(self.settings.get("fx_fps", 24))
@@ -3179,6 +3406,10 @@ class MainWindow(QMainWindow):
             elif cmd == "show":
                 self._show_from_tray()
                 reply = "ok"
+            elif cmd == "do":
+                reply = self.director.command(arg)
+                if self.dev:
+                    self._select_device(self.dev.index)
             elif cmd == "ping":
                 reply = "pong"
             else:
@@ -3195,12 +3426,60 @@ class MainWindow(QMainWindow):
         a = menu.addAction("Show RGB Deck")
         a.triggered.connect(self._show_from_tray)
         menu.addSeparator()
+        self.tray_power = menu.addAction("Lights off")
+        self.tray_power.triggered.connect(self.director.toggle)
+        self.tray_presets = menu.addMenu("Presets")
+        self.tray_presets.aboutToShow.connect(self._fill_tray_presets)
+        self.anim_menu.setTitle("Animate")
+        menu.addMenu(self.anim_menu)
+        bright = menu.addMenu("Brightness")
+        self.tray_bright: Dict[int, QAction] = {}
+        levels = QActionGroup(self)
+        for value in (100, 75, 50, 25, 10):
+            b = bright.addAction(f"{value} %")
+            b.setCheckable(True)
+            b.triggered.connect(lambda _c=False, v=value: self.director.set_master(v))
+            levels.addAction(b)
+            self.tray_bright[value] = b
+        menu.addSeparator()
         a = menu.addAction("Quit (effects stop, colors stay)")
         a.triggered.connect(self._quit)
+        self.tray_bright[min(self.tray_bright, key=lambda v: abs(v - self.director.master))].setChecked(True)
         self.tray.setContextMenu(menu)
         self.tray.setToolTip(APP_NAME)
         self.tray.activated.connect(lambda r: self._toggle_from_tray() if r == QSystemTrayIcon.Trigger else None)
         self.tray.show()
+
+    def _apply_hotkey_setting(self):
+        want = IS_WINDOWS and bool(self.settings.get("hotkeys", False))
+        if want and self._hotkeys is None:
+            self._hotkeys = WindowsHotkeys(self.hotkeyPressed.emit)
+            self._hotkeys.start()
+        elif not want and self._hotkeys is not None:
+            self._hotkeys.stop()
+            self._hotkeys = None
+
+    def _fill_tray_presets(self):
+        self.tray_presets.clear()
+        for name in sorted(self.presets):
+            a = self.tray_presets.addAction(name)
+            a.triggered.connect(lambda _c=False, n=name: self._apply_preset(n))
+        if not self.presets:
+            self.tray_presets.addAction("No presets saved yet").setEnabled(False)
+
+    def _director_changed(self):
+        """Master brightness / lights off changed (tray, command line, automation): reflect and remember it."""
+        d = self.director
+        self.tray_power.setText("Lights on" if d.dark else "Lights off")
+        near = min(self.tray_bright, key=lambda v: abs(v - d.master))
+        self.tray_bright[near].setChecked(True)
+        if self.settings.get("master", 100) != d.master:
+            self.settings["master"] = d.master
+            save_json(SETTINGS_FILE, self.settings)
+        if d.dark:
+            self.statusBar().showMessage("Lights are off (tray icon → Lights on, or rgbdeck --on)")
+        else:
+            self.statusBar().showMessage(f"Brightness {d.master} %" if d.master < 100 else "", 3000)
 
     def _toggle_from_tray(self):
         if self.isVisible() and not self.isMinimized() and self.isActiveWindow():
@@ -3316,38 +3595,98 @@ def apply_snapshot(client: LocalBackend, snap: dict, base_colors: Optional[dict]
 
 
 def run_headless_effect(client: LocalBackend, snap: dict) -> int:
-    """Keep a typing effect running without a window (used by 'apply at login')."""
-    import time as _time
+    """Keep a typing effect and / or an animation running without a window (used by 'apply at login')."""
+    fx = snap.get("app_effect") or None
+    anim = snap.get("animation") or {}
+    anim_kind = anim.get("kind") if anim.get("kind") in animations.NAMES else None
+    entries = {e["name"]: e for e in snap.get("devices", [])}
 
-    fx = snap["app_effect"]
-    dev = next((d for d in client.devices if d.name == fx.get("device")), None)
-    if not dev:
+    def base_of(d: Device) -> List[int]:
+        entry = entries.get(d.name)
+        return list(entry["colors"]) if entry and entry.get("colors") else list(d.colors)
+
+    engine = listener = fx_dev = None
+    fps = 24
+    if fx:
+        fx_dev = next((d for d in client.devices if d.name == fx.get("device")), None)
+    if fx_dev:
+        pos = {g.led: (g.x + g.w / 2, g.y + g.h / 2) for g in build_geometry(fx_dev)}
+        name_to_led = {(n[5:] if n.startswith("Key: ") else n): i for i, n in enumerate(fx_dev.led_names)}
+        settings = EffectSettings.from_dict(fx)
+        fps = settings.fps
+        r, g, b = u32_to_rgb(int(fx.get("active_color", 0x00B4FF)))
+        engine = EffectEngine(pos, name_to_led, lambda: (r, g, b))
+        engine.settings = settings
+        engine.background = base_of(fx_dev)
+        listener = KeyListener(find_keyboard_events(fx_dev.name), engine.key_pressed)
+        listener.start()
+    if not engine and not anim_kind:
         return 0
-    entry = next((e for e in snap["devices"] if e["name"] == dev.name), None)
-    base = list(entry["colors"]) if entry and entry.get("colors") else list(dev.colors)
-    geoms = build_geometry(dev)
-    pos = {g.led: (g.x + g.w / 2, g.y + g.h / 2) for g in geoms}
-    name_to_led = {(n[5:] if n.startswith("Key: ") else n): i for i, n in enumerate(dev.led_names)}
-    settings = EffectSettings.from_dict(fx)
-    r, g, b = u32_to_rgb(int(fx.get("active_color", 0x00B4FF)))
-    engine = EffectEngine(pos, name_to_led, lambda: (r, g, b))
-    engine.settings = settings
-    engine.background = base
-    listener = KeyListener(find_keyboard_events(dev.name), engine.key_pressed)
-    listener.start()
+    targets = []  # (device, xs, ys, base, dim) for the animation
+    if anim_kind:
+        skip = set(anim.get("skip") or [])
+        for d in client.devices:
+            if not d.led_names or d.name in skip or d.current_mode.color_mode != MODE_COLORS_PER_LED:
+                continue
+            drv = client.driver_for(d)
+            base = base_of(d)
+            if getattr(drv, "keeps_state", False) and not any(base):
+                continue
+            centres = {g.led: (g.x + g.w / 2, g.y + g.h / 2) for g in build_geometry(d)}
+            xs, ys = animations.normalise([centres.get(i, (0.0, 0.0)) for i in range(len(d.colors))])
+            if getattr(drv, "slow_colors", False):
+                xs, ys = [0.5] * len(xs), [0.5] * len(ys)
+            targets.append((d, xs, ys, base, entries.get(d.name, {}).get("dim", 100) / 100.0))
+    palette = [int(c) & 0xFFFFFF for c in (anim.get("palette") or [])][:6] or None
+    speed = int(anim.get("speed", 50))
     last = None
-    period = 1.0 / max(10, settings.fps)
+    period = 1.0 / max(10, fps)
+    t0 = time.monotonic()
     try:
         while True:
-            t = _time.monotonic()
-            frame = engine.tick(t)
-            if frame is not None and frame != last:
-                last = frame
-                client.update_leds(dev, frame)
-            _time.sleep(max(0.0, period - (_time.monotonic() - t)))
+            t = time.monotonic()
+            for d, xs, ys, base, f in targets:
+                frame = animations.render(anim_kind, t - t0, xs, ys, base, speed, palette)
+                if f < 0.999:
+                    frame = [rgb_to_u32(*(int(x * f + 0.5) for x in u32_to_rgb(c))) for c in frame]
+                if engine and d is fx_dev:
+                    engine.background = frame
+                    if engine.busy:
+                        continue
+                    last = None
+                client.update_leds(d, frame)
+            if engine:
+                frame = engine.tick(t)
+                if frame is not None and frame != last:
+                    last = frame
+                    client.update_leds(fx_dev, frame)
+            time.sleep(max(0.0, period - (time.monotonic() - t)))
     except (KeyboardInterrupt, DeviceError):
-        listener.stop()
+        if listener:
+            listener.stop()
         return 0
+
+
+REMOTE_FLAGS = {  # command line flag -> (director command, takes a value)
+    "--preset": ("preset", True),
+    "--next-preset": ("next-preset", False),
+    "--animate": ("animate", True),
+    "--brightness": ("brightness", True),
+    "--color": ("color", True),
+    "--toggle": ("toggle", False),
+    "--off": ("off", False),
+    "--on": ("on", False),
+}
+
+
+def remote_command(argv: List[str]) -> Optional[str]:
+    """The Director command a command line asks for (rgbdeck --toggle, --brightness +10, ...), or None."""
+    for flag, (cmd, valued) in REMOTE_FLAGS.items():
+        if flag in argv:
+            i = argv.index(flag)
+            value = argv[i + 1] if valued and i + 1 < len(argv) else ""
+            return f"{cmd} {value}".strip()
+    return None
 
 
 def apply_theme(app: QApplication):
@@ -3434,8 +3773,7 @@ def main(argv: List[str]) -> int:
         c.connect()
         snap = presets[name]
         apply_snapshot(c, snap)
-        fx = snap.get("app_effect")
-        if fx:
+        if snap.get("app_effect") or (snap.get("animation") or {}).get("kind"):
             return run_headless_effect(c, snap)
         c.shutdown()
         del qt_core
@@ -3444,6 +3782,16 @@ def main(argv: List[str]) -> int:
         for n in sorted(load_json(PRESETS_FILE, {})):
             print(n)
         return 0
+    remote = remote_command(argv)
+    if remote is not None:  # --toggle, --next-preset, ...: ask the running app
+        reply = send_control(f"do {remote}")
+        if reply is None:
+            if remote.startswith("preset "):
+                return main([argv[0], "--apply", remote[7:]])
+            print("RGB Deck is not running (start it, e.g. with --tray, and try again)", file=sys.stderr)
+            return 1
+        print(reply)
+        return 0 if reply.startswith("ok") else 1
     if "--version" in argv:
         print(f"{APP_NAME} {__version__}")
         return 0

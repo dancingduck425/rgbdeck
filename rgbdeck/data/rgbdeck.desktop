@@ -10,3 +10,24 @@ SingleMainWindow=true
 Categories=Utility;Settings;HardwareSettings;
 StartupWMClass=rgbdeck
 Keywords=RGB;keyboard;mouse;lighting;LED;
+Actions=Toggle;NextPreset;Brighter;Dimmer;AnimateOff;
+
+[Desktop Action Toggle]
+Name=Lights off / on
+Exec=rgbdeck --toggle
+
+[Desktop Action NextPreset]
+Name=Next preset
+Exec=rgbdeck --next-preset
+
+[Desktop Action Brighter]
+Name=Brighter
+Exec=rgbdeck --brightness +10
+
+[Desktop Action Dimmer]
+Name=Dimmer
+Exec=rgbdeck --brightness -10
+
+[Desktop Action AnimateOff]
+Name=Stop animation
+Exec=rgbdeck --animate off
