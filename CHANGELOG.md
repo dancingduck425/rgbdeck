@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.0 — 2026-11-10
+
+- **Music animations**: *Music: spectrum* (bars from bass to treble; rows on a keyboard, brightness on a strip)
+  and *Music: beat pulse* (brightness follows the bass). The sound is read from the PC's output — `parec` or
+  `pw-record` on Linux, the optional `soundcard` package on Windows (untested there) — never from a microphone,
+  and only while one of the two runs. `RGBDECK_AUDIO_DEVICE` picks another source. Verified on this hardware
+  with a test beat: keyboard spectrum, pulse on the Govee strip over Bluetooth.
+- **PC status colors** (Animate → Customize… → per device): CPU temperature, GPU temperature (nvidia-smi or
+  amdgpu) or CPU load as a color from blue to red, with or without an animation running on the other devices.
+- **Low battery**: a wireless device below 15 % gives one red flash on everything and a tray note.
+- Animation frames that did not change are no longer re-sent.
+
 ## 1.5.0 — 2026-11-10
 
 - **Tray menu**: lights off / on, presets, animations, brightness.

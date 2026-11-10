@@ -1,7 +1,7 @@
 # Maintainer: dancingduck425
 # Build & install from the checkout:  cd ~/src/rgbdeck && makepkg -si
 pkgname=rgbdeck
-pkgver=1.5.0
+pkgver=1.6.0
 pkgrel=1
 pkgdesc="Standalone RGB lighting control for keyboards, mice and motherboards (own drivers, direct hidraw)"
 arch=('any')

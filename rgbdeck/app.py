@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QColorDialog,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -119,7 +120,7 @@ def setup_logging(verbose: bool):
 
 from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
 from rgbdeck.hw import govee_lan, wled  # noqa: E402
-from rgbdeck import animations  # noqa: E402
+from rgbdeck import animations, audio, sensors  # noqa: E402
 from rgbdeck.director import Director  # noqa: E402
 from rgbdeck.effects import (  # noqa: E402
     EffectEngine,
@@ -1847,19 +1848,28 @@ class AnimateDialog(QDialog):
         self.colors: List[int] = list(w._anim_palette) or [0x7C6CFF, 0x00B4FF, 0xFF4FD8]
         lay.addLayout(self.palette_row)
         self._build_palette()
-        lay.addWidget(QLabel("Devices that take part"))
-        self.dev_checks: Dict[str, QCheckBox] = {}
+        lay.addWidget(QLabel("What each device does"))
+        self.dev_roles: Dict[str, QComboBox] = {}
+        offered = sensors.offered()
+        form = QFormLayout()
         for d in w.client.devices:
             if not d.led_names or w._per_led_mode(d) is None:
                 continue
-            c = QCheckBox(d.name)
-            c.setChecked(d.name not in w._anim_skip)
-            c.toggled.connect(self._devices_changed)
-            lay.addWidget(c)
-            self.dev_checks[d.name] = c
+            c = QComboBox()
+            c.addItem("Plays the animation", "play")
+            c.addItem("Sits out (keeps its own colors)", "skip")
+            for src in offered:
+                c.addItem(f"Shows {sensors.SOURCES[src][0]} (blue = cool, red = hot)", src)
+            role = w._anim_status.get(d.name) or ("skip" if d.name in w._anim_skip else "play")
+            c.setCurrentIndex(max(0, c.findData(role)))
+            c.currentIndexChanged.connect(self._devices_changed)
+            form.addRow(d.name, c)
+            self.dev_roles[d.name] = c
+        lay.addLayout(form)
         hint = QLabel(
-            "A room light that is switched off stays off. Devices without live per-LED control (some mice) "
-            "can't take part. Save a preset while an animation runs and the preset brings it back."
+            "Music animations follow whatever the PC is playing (no microphone). A room light that is switched "
+            "off stays off. Devices without live per-LED control (some mice) can't take part. Save a preset "
+            "while an animation runs and the preset brings it back."
         )
         hint.setWordWrap(True)
         hint.setObjectName("hint")
@@ -1910,15 +1920,19 @@ class AnimateDialog(QDialog):
 
     def _devices_changed(self, *_a):
         w = self.w
-        w._anim_skip = {name for name, c in self.dev_checks.items() if not c.isChecked()}
-        for d in w.client.devices:  # a device that just left the animation gets its own colors back
-            if d.name in w._anim_skip and d.index in w._anim_touched:
+        roles = {name: c.currentData() for name, c in self.dev_roles.items()}
+        w._anim_skip = {n for n, r in roles.items() if r == "skip"}
+        w._anim_status = {n: r for n, r in roles.items() if r in sensors.SOURCES}
+        w._anim_last.clear()
+        for d in w.client.devices:  # a device that just left gets its own colors back
+            idle = roles.get(d.name) == "skip" or (roles.get(d.name) == "play" and not w._anim_kind)
+            if idle and d.index in w._anim_touched:
                 w._anim_touched.discard(d.index)
                 try:
                     w.director.send(d, w._shown_base(d))
                 except DeviceError:
                     pass
-        self._store()
+        w._set_animation(w._anim_kind)  # starts / stops the timer and the sensor reader as needed
 
     def _store(self):
         self.w.settings["animation"] = self.w._animation_dict()
@@ -2098,6 +2112,12 @@ class MainWindow(QMainWindow):
         self._anim_speed = 50
         self._anim_palette: List[int] = []  # the user's colors for wave / cycle / aurora (empty: rainbow)
         self._anim_skip: Set[str] = set()  # names of devices that sit animations out
+        self._anim_status: Dict[str, str] = {}  # device name -> sensor it shows instead (cpu | gpu | load)
+        self._anim_last: Dict[int, List[int]] = {}  # last frame per device: identical frames are not re-sent
+        self._battery_warned: Dict[str, float] = {}
+        self._battery_timer = QTimer(self)
+        self._battery_timer.timeout.connect(self._battery_check)
+        self._battery_timer.start(5 * 60 * 1000)
         self._anim_t0 = time.monotonic()
         self._anim_pos: Dict[int, tuple] = {}  # device index -> normalised LED positions
         self._anim_touched: Set[int] = set()
@@ -2931,11 +2951,26 @@ class MainWindow(QMainWindow):
         self.anim_actions[kind].setChecked(True)
         near = min(self.anim_speeds, key=lambda v: abs(v - self._anim_speed))
         self.anim_speeds[near].setChecked(True)
+        if kind in animations.NEEDS_AUDIO:
+            ok, why = audio.start()
+            if not ok:
+                self.statusBar().showMessage(why, 10000)
+                kind = self._anim_kind = None
+                self.anim_actions[None].setChecked(True)
+                if remember:
+                    self.settings["animation"] = self._animation_dict()
+                    save_json(SETTINGS_FILE, self.settings)
+        else:
+            audio.stop()
         self.anim_btn.setText(f"✨  {animations.NAMES[kind]}" if kind else "✨  Animate")
+        self._anim_last.clear()
+        self._sync_status_devices()
         if kind is None:
-            self._anim_timer.stop()
-            if was:
-                self._restore_after_animation()
+            self._restore_after_animation()  # only devices an animation touched; those showing a sensor carry on
+            if not self._status_devices():
+                self._anim_timer.stop()
+            elif not self._anim_timer.isActive():
+                self._anim_timer.start(int(1000 / max(10, int(self.settings.get("fx_fps", 24)))))
             if not self.engine:
                 self.tray.setToolTip(APP_NAME)
             return
@@ -2956,38 +2991,74 @@ class MainWindow(QMainWindow):
             "speed": self._anim_speed,
             "palette": list(self._anim_palette),
             "skip": sorted(self._anim_skip),
+            "status": dict(self._anim_status),
         }
+
+    def _status_devices(self) -> Dict[str, str]:
+        """Connected devices that show a sensor: name -> source."""
+        names = {d.name for d in self.client.devices}
+        return {n: src for n, src in self._anim_status.items() if n in names and src in sensors.SOURCES}
+
+    def _sync_status_devices(self):
+        """Tell the sensor reader which values some device is showing right now."""
+        sensors.watch(sorted(set(self._status_devices().values())))
+
+    def _battery_check(self):
+        """A wireless device running low: one red flash on everything and a tray note, at most every 10 minutes."""
+        if self._scanning or self.director.dark:
+            return
+        for d in self.client.devices:
+            try:
+                info = self.client.battery(d)
+            except DeviceError:
+                continue
+            if not info or info[1] or info[0] >= 15:
+                continue
+            if time.monotonic() - self._battery_warned.get(d.name, -1e9) < 600:
+                continue
+            self._battery_warned[d.name] = time.monotonic()
+            self.director.flash((255, 30, 30), 3)
+            if self.tray.isVisible():
+                self.tray.showMessage(APP_NAME, f"{d.name}: battery at {info[0]} %", QSystemTrayIcon.Warning, 8000)
 
     def _load_animation(self, saved: dict, remember: bool = False):
         """Take over a stored animation (settings or a preset) and start it if it names one."""
         self._anim_palette = [int(c) & 0xFFFFFF for c in (saved.get("palette") or [])][:6]
         self._anim_skip = {str(n) for n in (saved.get("skip") or [])}
+        self._anim_status = {str(k): str(v) for k, v in (saved.get("status") or {}).items() if v in sensors.SOURCES}
         self._anim_pos.clear()
         self._set_animation(saved.get("kind"), saved.get("speed", 50), remember=remember)
 
     def _customize_animation(self):
         AnimateDialog(self).exec()
 
-    def _anim_devices(self) -> List[Device]:
-        """Devices an animation may drive: per-LED capable, and not a room light that is switched off."""
+    def _anim_devices(self) -> List[tuple]:
+        """(device, what it plays) for every device an animation may drive right now: per-LED capable, not on
+        an onboard effect, and not a room light that is switched off. What it plays is the running animation,
+        or "status:<sensor>" for a device set to show a sensor."""
         out = []
+        status = self._status_devices()
         for d in self.client.devices:
-            if not d.led_names or self._per_led_mode(d) is None or d.name in self._anim_skip:
+            if not d.led_names or self._per_led_mode(d) is None:
+                continue
+            kind = f"status:{status[d.name]}" if d.name in status else self._anim_kind
+            if kind is None or (d.name in self._anim_skip and d.name not in status):
                 continue
             drv = self.client.driver_for(d)
             if d.current_mode.color_mode != MODE_COLORS_PER_LED:
                 continue  # the user picked an onboard effect / scene for this one: leave it alone
             if getattr(drv, "keeps_state", False) and not any(self._shown_base(d)):
                 continue  # a room light that is off: an animation must not switch it on
-            out.append(d)
+            out.append((d, kind))
         return out
 
     def _anim_tick(self):
-        if not self._anim_kind or self._scanning or not self.client.connected:
+        if self._scanning or not self.client.connected:
             return
         t = time.monotonic() - self._anim_t0
+        signal = audio.levels() if self._anim_kind in animations.NEEDS_AUDIO else None
         try:
-            for d in self._anim_devices():
+            for d, kind in self._anim_devices():
                 pos = self._anim_pos.get(d.index)
                 if pos is None or len(pos[0]) != len(d.colors):
                     centres = {g.led: (g.x + g.w / 2, g.y + g.h / 2) for g in build_geometry(d)}
@@ -2996,9 +3067,12 @@ class MainWindow(QMainWindow):
                         xs, ys = [0.5] * len(xs), [0.5] * len(ys)  # one color per frame is all it can keep up with
                     pos = self._anim_pos[d.index] = (xs, ys)
                 base = self.base_colors.get(d.index, list(d.colors))
-                frame = animations.render(
-                    self._anim_kind, t, pos[0], pos[1], base, self._anim_speed, self._anim_palette or None
-                )
+                if kind.startswith("status:"):
+                    frame = animations.render("status", t, pos[0], pos[1], base, 50, None, sensors.level(kind[7:]))
+                else:
+                    frame = animations.render(
+                        kind, t, pos[0], pos[1], base, self._anim_speed, self._anim_palette or None, signal
+                    )
                 f = self.dim.get(d.index, 100) / 100.0
                 if f < 0.999:
                     frame = [rgb_to_u32(*(int(x * f + 0.5) for x in u32_to_rgb(c))) for c in frame]
@@ -3008,6 +3082,9 @@ class MainWindow(QMainWindow):
                     if self.engine.busy:
                         continue
                     self._fx_last_frame = None
+                if self._anim_last.get(d.index) == frame:
+                    continue  # nothing moved (a steady temperature, silence): no need to send it again
+                self._anim_last[d.index] = frame
                 self.director.send(d, frame)
                 if d is self.dev:
                     self.canvas.set_colors(frame)
@@ -3017,8 +3094,9 @@ class MainWindow(QMainWindow):
 
     def _restore_after_animation(self):
         touched, self._anim_touched = self._anim_touched, set()
+        status = self._status_devices()
         for d in self.client.devices:
-            if d.index not in touched:
+            if d.index not in touched or d.name in status:
                 continue
             base = self._shown_base(d)
             try:
@@ -3041,7 +3119,7 @@ class MainWindow(QMainWindow):
     def _pulse_followers(self, restore: bool = False):
         """Room lights have no keys to ripple across, so they flash toward the color of each key press while a
         typing effect runs on the keyboard, and fall back to their own colors as it fades."""
-        if self._anim_kind and not restore:
+        if (self._anim_kind or self._status_devices()) and not restore:
             return  # an animation is driving the room lights
         level, col = (0.0, (0, 0, 0)) if restore or not self.engine else self.engine.activity()
         quiet = level < 0.02
@@ -3237,14 +3315,17 @@ class MainWindow(QMainWindow):
         self._populate_devices()
         self.director.forget()
         self._anim_pos.clear()
+        self._anim_last.clear()
+        self._sync_status_devices()
         self._anim_touched.clear()
         if self._anim_resume:
             self._anim_resume = False
             saved = self.settings.get("animation") or {}
             self._anim_palette = [int(c) & 0xFFFFFF for c in (saved.get("palette") or [])][:6]
             self._anim_skip = {str(n) for n in (saved.get("skip") or [])}
+            self._anim_status = {str(k): str(v) for k, v in (saved.get("status") or {}).items() if v in sensors.SOURCES}
             self._anim_speed = max(1, min(100, int(saved.get("speed", 50))))
-            if saved.get("kind") and self.client.devices:
+            if (saved.get("kind") or self._anim_status) and self.client.devices:
                 self._set_animation(saved.get("kind"), None, remember=False)
         fx, self._scan_resume_fx = self._scan_resume_fx, None
         if fx:
@@ -3503,7 +3584,11 @@ class MainWindow(QMainWindow):
     def closeEvent(self, e):
         self.settings["palette"] = self.color_panel.palette_colors
         save_json(SETTINGS_FILE, self.settings)
-        if (self.engine or self._anim_kind) and not getattr(self, "_really_quit", False) and self.tray.isVisible():
+        if (
+            (self.engine or self._anim_kind or self._status_devices())
+            and not getattr(self, "_really_quit", False)
+            and self.tray.isVisible()
+        ):
             # a typing effect or an animation is running: keep it alive in the tray
             e.ignore()
             self.hide()
@@ -3518,8 +3603,12 @@ class MainWindow(QMainWindow):
                 save_json(SETTINGS_FILE, self.settings)
             return
         self._stop_app_effect()
-        if self._anim_kind:
-            self._set_animation(None, remember=False)  # devices go back to their own colors; it resumes next start
+        status, self._anim_status = self._anim_status, {}
+        self._set_animation(None, remember=False)  # devices go back to their own colors; it resumes next start
+        self._anim_status = status
+        self._anim_timer.stop()
+        audio.stop()
+        sensors.watch([])
         self.tray.hide()
         self._keep_look_on_close()
         self.client.wait_idle(4.0)

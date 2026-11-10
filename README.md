@@ -14,6 +14,10 @@ background daemon, no third-party RGB software.
 - **Sync all devices**: one click colors keyboard + mouse + motherboard + room lights.
 - **Animations on everything at once**: rainbow wave, color cycle, breathing, aurora, fire, starlight, played in
   step across keyboard, mainboard and room lights (**✨ Animate**). Typing effects render on top of them.
+- **Music visualizer**: a spectrum across the keyboard and a beat pulse on the room lights, from whatever the PC
+  is playing (the output is tapped, never a microphone).
+- **PC status colors**: any device can show CPU / GPU temperature or CPU load, blue when cool to red when hot;
+  a red flash warns when a wireless mouse runs low.
 - **Govee lights** over Wi-Fi or Bluetooth: color, per-segment painting, whites, built-in scenes, and a pulse on
   every key press while a typing effect runs. **WLED** strips are found on the network by themselves.
 - **Presets**, apply-at-login, tray icon, single instance.

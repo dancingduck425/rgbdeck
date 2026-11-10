@@ -24,9 +24,12 @@ KINDS: List[Tuple[str, str, str]] = [
     ("aurora", "Aurora", "Slow green, teal and violet curtains"),
     ("fire", "Fire", "Flickering embers"),
     ("twinkle", "Starlight", "Your colors dimmed, with stars glinting across them"),
+    ("spectrum", "Music: spectrum", "Bars for bass to treble of whatever the PC is playing"),
+    ("pulse", "Music: beat pulse", "Everything pulses with the bass and changes color on the beat"),
 ]
+NEEDS_AUDIO = ("spectrum", "pulse")
 NAMES = {k: label for k, label, _tip in KINDS}
-USES_PALETTE = ("wave", "cycle", "aurora")
+USES_PALETTE = ("wave", "cycle", "aurora", "spectrum", "pulse")
 TAU = 2 * math.pi
 
 
@@ -73,11 +76,44 @@ def render(
     base: Sequence[int],
     speed: int = 50,
     palette: Optional[Sequence[int]] = None,
+    signal=None,
 ) -> List[int]:
     """One frame: a color per LED. base = the device's own colors (some animations build on them);
-    palette = the user's own colors for wave / cycle / aurora instead of the rainbow."""
+    palette = the user's own colors instead of the rainbow; signal = audio.Levels for the music animations."""
     n = len(xs)
     w = rate(speed)
+    if kind in NEEDS_AUDIO:
+        bands = list(getattr(signal, "bands", None) or [0.0] * 8)
+        if not getattr(signal, "active", False):  # nothing is playing: the device's own look, dimmed
+            return [_scaled(c, 0.35) for c in base] if any(base) else [rgb_to_u32(10, 10, 16)] * n
+        if kind == "spectrum":
+            out = []
+            flat = max(ys, default=0.5) - min(ys, default=0.5) < 1e-6  # a strip or a single light: no rows
+            for i in range(n):
+                f = xs[i] * (len(bands) - 1)
+                j = min(len(bands) - 2, int(f))
+                lvl = bands[j] + (bands[j + 1] - bands[j]) * (f - j)
+                color = gradient(palette, xs[i] * 0.999) if palette else _hsv(0.62 - 0.62 * xs[i], 1.0, 1.0)
+                if flat:
+                    out.append(_scaled(color, 0.06 + 0.94 * lvl))
+                else:  # bars growing from the bottom row
+                    height = 1.0 - ys[i]
+                    lit = max(0.0, min(1.0, (lvl * 1.2 - height) * 4.0))
+                    out.append(_scaled(color, 0.05 + 0.95 * lit))
+            return out
+        bass, beat = float(getattr(signal, "bass", 0.0)), float(getattr(signal, "beat", 0.0))
+        k = min(1.0, 0.12 + 0.75 * bass + 0.35 * beat)
+        if palette:
+            color = gradient(palette, t * w * 0.25)
+        elif any(base):
+            return [_scaled(c, k) for c in base]
+        else:
+            color = _hsv(t * w * 0.25, 1.0, 1.0)
+        return [_scaled(color, k)] * n
+    if kind == "status":  # signal = 0..1, cool to hot (sensors.level)
+        lvl = max(0.0, min(1.0, float(signal))) if signal is not None else 0.0
+        glow = 1.0 if lvl < 0.9 else 0.7 + 0.3 * math.sin(TAU * t * 1.2)  # hot: a slow warning pulse
+        return [_hsv(0.62 * (1.0 - lvl), 1.0, glow)] * n
     if kind == "wave":
         if palette:
             return [gradient(palette, xs[i] * 0.85 - t * w) for i in range(n)]

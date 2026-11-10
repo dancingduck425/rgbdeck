@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rgbdeck"
-version = "1.5.0"
+version = "1.6.0"
 description = "Standalone RGB lighting control for keyboards, mice and motherboards (own drivers, direct hidraw)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,6 +23,7 @@ dependencies = ["PySide6>=6.5", "hidapi>=0.15; sys_platform != 'linux'"]
 
 [project.optional-dependencies]
 evdev = ["evdev>=1.6"]        # only adds extra key-code names; the common keys are built in
+music = ["soundcard>=0.4; sys_platform == 'win32'"]  # music animations on Windows (Linux uses parec / pw-record)
 
 [project.scripts]
 rgbdeck = "rgbdeck.app:main_entry"

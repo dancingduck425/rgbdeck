@@ -27,7 +27,8 @@ for kind, label, _tip in an.KINDS:
     b = an.render(kind, 1.234, xs, ys, base, 50)
     later = an.render(kind, 1.9, xs, ys, base, 50)
     ok = len(a) == 12 and all(0 <= c <= 0xFFFFFF for c in a)
-    check(ok and a == b and a != later, f"{label}: one color per LED, same time same frame, moves with time")
+    moves = a != later or kind in an.NEEDS_AUDIO  # music animations move with the sound, not the clock
+    check(ok and a == b and moves, f"{label}: one color per LED, same time same frame, moves with time")
     check(len(an.render(kind, 0.5, [0.5], [0.5], [0], 50)) == 1, f"{label}: works on a one-LED device")
 wave = an.render("wave", 0.0, xs, ys, base)
 check(len(set(wave)) > 6, "wave: colors differ along the device")
@@ -53,6 +54,44 @@ check(
     "starlight: dimmed colors with bright glints",
 )
 check(an.rate(1) < an.rate(50) < an.rate(100), "speed slider is monotonic")
+pal = [rgb_to_u32(255, 0, 0), rgb_to_u32(0, 0, 255)]
+check(
+    all(c & 0x00FF00 == 0 for c in an.render("wave", 0.7, xs, ys, base, 50, pal)),
+    "own colors: the wave stays inside them",
+)
+check(
+    an.gradient(pal, 0.0) == pal[0] and an.gradient(pal, 0.5) == pal[1] and an.gradient(pal, 1.0) == pal[0],
+    "gradient is a ring",
+)
+
+
+class Sig:
+    def __init__(self, bands, bass=0.0, beat=0.0, active=True):
+        self.bands, self.bass, self.beat, self.active = bands, bass, beat, active
+
+
+quiet = an.render("spectrum", 1.0, xs, ys, base, 50, None, Sig([0.0] * 8, active=False))
+check(
+    quiet == [rgb_to_u32(70, 35, 18)] * 12 or max(u32_to_rgb(quiet[0])) < 100,
+    "music: silence shows the own look, dimmed",
+)
+bassy = an.render("spectrum", 1.0, xs, ys, base, 50, None, Sig([1.0, 1.0, 0, 0, 0, 0, 0, 0]))
+left = max(max(u32_to_rgb(c)) for c, x in zip(bassy, xs) if x < 0.15)
+right = max(max(u32_to_rgb(c)) for c, x in zip(bassy, xs) if x > 0.7)
+check(left > 200 and right < 40, f"spectrum: bass lights the left side only ({left} vs {right})")
+strip = an.render("spectrum", 1.0, [0.0, 0.5, 1.0], [0.5] * 3, [0] * 3, 50, None, Sig([1.0] * 4 + [0.0] * 4))
+check(max(u32_to_rgb(strip[0])) > 200 and max(u32_to_rgb(strip[2])) < 40, "spectrum on a strip: brightness per band")
+soft = max(u32_to_rgb(an.render("pulse", 1.0, xs, ys, base, 50, None, Sig([0] * 8, bass=0.0))[0]))
+hard = max(u32_to_rgb(an.render("pulse", 1.0, xs, ys, base, 50, None, Sig([0] * 8, bass=1.0, beat=1.0))[0]))
+check(hard > 190 and soft < 40, f"beat pulse: brightness follows the bass ({soft} -> {hard})")
+cold, hot = (
+    an.render("status", 0.0, [0.5], [0.5], [0], 50, None, 0.0)[0],
+    an.render("status", 0.0, [0.5], [0.5], [0], 50, None, 1.0)[0],
+)
+check(
+    u32_to_rgb(cold)[2] > 200 and u32_to_rgb(cold)[0] < 60 and u32_to_rgb(hot)[0] > 150 and u32_to_rgb(hot)[2] < 30,
+    "status: blue when cool, red when hot",
+)
 check(an.render("nonsense", 1.0, xs, ys, base) == base, "an unknown animation leaves the colors alone")
 
 print("\nALL PASSED" if not fails else "\nFAILURES: " + str(fails))

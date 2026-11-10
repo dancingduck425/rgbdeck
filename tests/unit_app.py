@@ -166,14 +166,15 @@ client.wait_idle()
 w.base_colors[3] = [blue]
 
 # animations play on every per-LED device at once; a room light that is off stays off; stopping restores colors
-check(hasattr(w, "anim_btn") and len(w.anim_actions) == 7, "Animate menu lists Off + six animations")
+check(hasattr(w, "anim_btn") and len(w.anim_actions) == 9, "Animate menu lists Off + eight animations")
 painted_before = list(w.base_colors[1])
 room_writes = len(room.writes)
 w.base_colors[3] = [0]  # the room light is off
 w._set_animation("wave", 80)
 client.wait_idle()
 check(
-    w._anim_timer.isActive() and w.settings["animation"] == {"kind": "wave", "speed": 80, "palette": [], "skip": []},
+    w._anim_timer.isActive()
+    and w.settings["animation"] == {"kind": "wave", "speed": 80, "palette": [], "skip": [], "status": {}},
     "animation runs and is remembered",
 )
 check(len(set(painted.writes[-1])) == 3, f"wave: the keys show different colors ({painted.writes[-1]})")
@@ -241,6 +242,32 @@ w._set_animation(None)
 w._anim_palette, w._anim_skip = [], set()
 w.presets.pop("Party")
 client.wait_idle()
+
+# a device set to show a sensor does so with no animation running, and keeps doing so next to one
+from rgbdeck import sensors  # noqa: E402
+
+sensors._READERS["cpu"] = lambda: 85.0  # as hot as the scale goes
+w._anim_status = {"Painted board": "cpu"}
+w._set_animation(None)
+check(w._anim_timer.isActive(), "a status device keeps the animation clock running by itself")
+time.sleep(0.4)
+w._anim_tick()
+client.wait_idle()
+check(
+    painted.writes[-1] == [rgb_to_u32(255, 0, 0)] * 3 or painted.writes[-1][0] & 0xFF > 150,
+    f"hot CPU shows red ({painted.writes[-1]})",
+)
+n_same = len(painted.writes)
+w._anim_tick()
+client.wait_idle()
+check(len(painted.writes) <= n_same + 1, "a steady reading is not sent over and over")
+w._anim_status = {}
+w._set_animation(None)
+client.wait_idle()
+check(
+    not w._anim_timer.isActive() and painted.writes[-1] == painted_before, "taking the sensor away restores the colors"
+)
+sensors.watch([])
 
 # the director: master brightness, lights off / on, flash, text commands
 d = w.director
