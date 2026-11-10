@@ -681,6 +681,7 @@ class ColorPanel(QWidget):
         while self.palette_grid.count():
             w = self.palette_grid.takeAt(0).widget()
             if w:
+                w.hide()
                 w.deleteLater()
         per_row = 8
         for i, hx in enumerate(DEFAULT_PALETTE + self.palette_colors):
@@ -1246,6 +1247,7 @@ class EffectsPanel(QWidget):
         while self.chips.count():
             w = self.chips.takeAt(0).widget()
             if w:
+                w.hide()
                 w.deleteLater()
         if dev:
             per_row = 3
@@ -1316,6 +1318,7 @@ class EffectsPanel(QWidget):
             while lay.count():
                 it = lay.takeAt(0)
                 if it.widget():
+                    it.widget().hide()
                     it.widget().deleteLater()
         for b in self.dir_group.buttons():
             self.dir_group.removeButton(b)
@@ -1626,6 +1629,16 @@ class LightsDialog(QDialog):
         if self.enable.isChecked() and not any(r["state"] in ("connected", "bluetooth") for r in self._shown or []):
             QTimer.singleShot(200, self._search)  # nothing connected: go and look without being asked
 
+    def _fit(self):
+        """Grow to what the rows and texts need. adjustSize() alone stops at two thirds of the screen, and on
+        a small screen the layout then squeezes the word-wrapped rows until their text is cut off."""
+        self.adjustSize()
+        lay = self.layout()
+        need = max(lay.totalMinimumSize().height(), lay.totalHeightForWidth(self.width()))
+        if self.height() < need:
+            screen = self.screen().availableGeometry().height() if self.screen() else need
+            self.resize(self.width(), min(need, max(self.height(), screen - 40)))
+
     # ---- list -------------------------------------------------------------------
     def _refresh(self):
         rows = (govee_lan.status_report() if self.enable.isChecked() else []) + wled.status_report()
@@ -1635,6 +1648,7 @@ class LightsDialog(QDialog):
         while self.rows.count():
             item = self.rows.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         if not rows:
             empty = QLabel(
@@ -1644,7 +1658,7 @@ class LightsDialog(QDialog):
             )
             empty.setWordWrap(True)
             self.rows.addWidget(empty)
-            QTimer.singleShot(0, self.adjustSize)
+            QTimer.singleShot(0, self._fit)
             return
         for r in rows:
             color, text = LIGHT_STATES.get(r["state"], LIGHT_STATES["checking"])
@@ -1663,7 +1677,7 @@ class LightsDialog(QDialog):
                 rm.clicked.connect(lambda _c=False, ip=r.get("key") or r["ip"]: self._remove(ip))
                 h.addWidget(rm, 0, Qt.AlignTop)
             self.rows.addWidget(w)
-        QTimer.singleShot(0, self.adjustSize)  # word-wrapped rows change the height the dialog needs
+        QTimer.singleShot(0, self._fit)  # word-wrapped rows change the height the dialog needs
 
     def _toggle(self, _on: bool = False):
         self.bluetooth.setEnabled(self.enable.isChecked())
@@ -1741,6 +1755,7 @@ class LightsDialog(QDialog):
             )
         self.result.setText(" ".join(parts))
         self._refresh()
+        QTimer.singleShot(0, self._fit)
 
     def _remove(self, ip: str):
         if govee_lan.forget(ip) | wled.forget(ip):
@@ -1888,6 +1903,7 @@ class AnimateDialog(QDialog):
         while self.palette_row.count():
             item = self.palette_row.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         for i, col in enumerate(self.colors):
             sw = Swatch(u32_to_qcolor(col), 30)
@@ -2388,6 +2404,7 @@ class _AutomationHost:
 class MainWindow(QMainWindow):
     scanFinished = Signal()
     hotkeyPressed = Signal(str)
+    batteryRead = Signal(str, object)
 
     def __init__(self, client: LocalBackend):
         super().__init__()
@@ -2429,6 +2446,10 @@ class MainWindow(QMainWindow):
         self._anim_skip: Set[str] = set()  # names of devices that sit animations out
         self._anim_status: Dict[str, str] = {}  # device name -> sensor it shows instead (cpu | gpu | load)
         self._anim_last: Dict[int, List[int]] = {}  # last frame per device: identical frames are not re-sent
+        self._anim_parked: Dict[int, int] = {}  # device index -> onboard effect it showed before an animation
+        self._battery_cache: Dict[str, tuple] = {}  # device name -> (when asked, (percent, on cable) or None)
+        self._battery_asking: Set[str] = set()
+        self.batteryRead.connect(self._battery_arrived)
         self._battery_warned: Dict[str, float] = {}
         self._battery_timer = QTimer(self)
         self._battery_timer.timeout.connect(self._battery_check)
@@ -2755,6 +2776,7 @@ class MainWindow(QMainWindow):
                         pass
         for t in self.tabs:
             self.tabs_lay.removeWidget(t)
+            t.hide()
             t.deleteLater()
         self.tabs = []
         keep = self.dev.index if self.dev else None
@@ -2786,7 +2808,7 @@ class MainWindow(QMainWindow):
             t.setChecked(t.dev.index == idx)
         d = self.dev
         title = f"{ICONS.get(d.type_name, '●')}  {d.name}"
-        info = self.client.battery(d)
+        info = self._battery_info(d)
         if info:
             if True:
                 pct, wired = info
@@ -2824,6 +2846,7 @@ class MainWindow(QMainWindow):
         while lay.count() > 1:
             w = lay.takeAt(1).widget()
             if w:
+                w.hide()
                 w.deleteLater()
         self.zone_spins = {}
         resizable = [z for z in d.zones if z.leds_min != z.leds_max]
@@ -3303,6 +3326,8 @@ class MainWindow(QMainWindow):
             self._anim_pos.clear()
             for d in self.client.devices:  # devices showing an onboard effect join in; room lights decide themselves
                 if d.led_names and not getattr(self.client.driver_for(d), "keeps_state", False):
+                    if d.current_mode.color_mode != MODE_COLORS_PER_LED and self._per_led_mode(d) is not None:
+                        self._anim_parked[d.index] = d.active_mode  # it gets this effect back afterwards
                     self._ensure_per_led(d)
         self._anim_timer.start(int(1000 / max(10, int(self.settings.get("fx_fps", 24)))))
         if not self.engine:
@@ -3327,23 +3352,50 @@ class MainWindow(QMainWindow):
         """Tell the sensor reader which values some device is showing right now."""
         sensors.watch(sorted(set(self._status_devices().values())))
 
+    def _battery_info(self, d: Device):
+        """(percent, on cable) as last read, or None. Asking the device waits for its turn on the I/O thread,
+        so it happens in the background; the title updates when the answer arrives."""
+        if not hasattr(self.client.driver_for(d), "battery"):
+            return None
+        asked, info = self._battery_cache.get(d.name, (-1e9, None))
+        if time.monotonic() - asked > 60 and d.name not in self._battery_asking:
+            self._battery_asking.add(d.name)
+
+            def work(dev=d):
+                try:
+                    got = self.client.battery(dev)
+                except Exception:  # noqa: BLE001 - the device may have gone meanwhile
+                    got = None
+                try:
+                    self.batteryRead.emit(dev.name, got)
+                except RuntimeError:
+                    pass  # the window is gone
+
+            threading.Thread(target=work, name="rgbdeck-battery", daemon=True).start()
+        return info
+
+    def _battery_arrived(self, name: str, info):
+        self._battery_asking.discard(name)
+        previous = self._battery_cache.get(name, (0.0, None))[1]
+        self._battery_cache[name] = (time.monotonic(), info)
+        if self.dev is not None and self.dev.name == name and info != previous:
+            self._select_device(self.dev.index)
+        # running low: one red flash on everything and a tray note, at most every 10 minutes
+        if not info or info[1] or info[0] >= 15 or self.director.dark:
+            return
+        if time.monotonic() - self._battery_warned.get(name, -1e9) < 600:
+            return
+        self._battery_warned[name] = time.monotonic()
+        self.director.flash((255, 30, 30), 3)
+        if self.tray.isVisible():
+            self.tray.showMessage(APP_NAME, f"{name}: battery at {info[0]} %", QSystemTrayIcon.Warning, 8000)
+
     def _battery_check(self):
-        """A wireless device running low: one red flash on everything and a tray note, at most every 10 minutes."""
-        if self._scanning or self.director.dark:
+        """Every few minutes: have wireless devices report their battery (in the background)."""
+        if self._scanning:
             return
         for d in self.client.devices:
-            try:
-                info = self.client.battery(d)
-            except DeviceError:
-                continue
-            if not info or info[1] or info[0] >= 15:
-                continue
-            if time.monotonic() - self._battery_warned.get(d.name, -1e9) < 600:
-                continue
-            self._battery_warned[d.name] = time.monotonic()
-            self.director.flash((255, 30, 30), 3)
-            if self.tray.isVisible():
-                self.tray.showMessage(APP_NAME, f"{d.name}: battery at {info[0]} %", QSystemTrayIcon.Warning, 8000)
+            self._battery_info(d)
 
     def _load_animation(self, saved: dict, remember: bool = False):
         """Take over a stored animation (settings or a preset) and start it if it names one."""
@@ -3419,8 +3471,20 @@ class MainWindow(QMainWindow):
     def _restore_after_animation(self):
         touched, self._anim_touched = self._anim_touched, set()
         status = self._status_devices()
+        parked, self._anim_parked = self._anim_parked, {}
         for d in self.client.devices:
-            if d.index not in touched or d.name in status:
+            if d.name in status:
+                continue
+            was = parked.get(d.index)
+            if was is not None and was < len(d.modes) and d.current_mode.color_mode == MODE_COLORS_PER_LED:
+                try:  # it was showing an onboard effect before the animation borrowed it: give that back
+                    self.client.update_mode(d, d.modes[was])
+                except DeviceError:
+                    pass
+                if d is self.dev:
+                    self._select_device(d.index)
+                continue
+            if d.index not in touched:
                 continue
             base = self._shown_base(d)
             try:
@@ -3517,6 +3581,7 @@ class MainWindow(QMainWindow):
         while self.presets_lay.count():
             w = self.presets_lay.takeAt(0).widget()
             if w:
+                w.hide()
                 w.deleteLater()
         auto = self.settings.get("autostart_preset") if autostart_enabled("apply") else None
         for name in sorted(self.presets):
@@ -3645,6 +3710,7 @@ class MainWindow(QMainWindow):
         self.director.forget()
         self._anim_pos.clear()
         self._anim_last.clear()
+        self._anim_parked.clear()
         self._sync_status_devices()
         self._anim_touched.clear()
         if self._anim_resume:

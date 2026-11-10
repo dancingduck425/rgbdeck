@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.1 — 2026-11-10
+
+Found by driving the real window through every tab, chip, dialog, drag and animation while timing the UI:
+
+- **Stopping an animation left devices dark** that had been showing an onboard effect (a mainboard on
+  Breathing): they were moved to direct colors for the animation and never moved back. They get their effect
+  back now.
+- **Opening the mouse tab hitched** for about 50 ms, and up to a second while the device thread was busy: the
+  battery was read on the UI thread, also by the 5-minute low-battery check. It is read in the background now.
+- **Lights panel on small screens**: rows were squeezed until their text was cut off; the panel now grows to
+  what its rows need.
+- Chips of the previous device are hidden at once when switching devices instead of at the next event-loop pass.
+
 ## 1.8.0 — 2026-11-10
 
 - **Phone page** (Settings → Phone page, off by default): a small page on port 8765 for a phone on the home

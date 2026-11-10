@@ -213,6 +213,10 @@ check(
     not w._anim_timer.isActive() and painted.writes[-1] == painted_before, "stopping gives every device its colors back"
 )
 check(room.writes[-1] == [blue] and w.settings["animation"]["kind"] is None, "room light restored, choice remembered")
+check(
+    fx.device.current_mode.name == "Breathing",
+    f"a device that showed an onboard effect gets it back ({fx.device.current_mode.name})",
+)
 w._set_animation("cycle")
 w._everything_off()
 check(w._anim_kind is None, "All off stops the animation")
