@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.1 — 2026-11-10
+
+- **Check for updates…** is in the tray menu too.
+- When the update window opens while RGB Deck sits in the tray, a tray note says so (the window can open
+  behind others).
+- The updater is now verified end to end against GitHub: a git checkout and an `install.sh` source folder of
+  1.9.0 each found this release, installed it with **Update now** and came back up as 1.9.1.
+
 ## 1.9.0 — 2026-11-10
 
 - **Updater.** Once a day (Settings → Updates, on by default) the app asks GitHub for the newest release. When

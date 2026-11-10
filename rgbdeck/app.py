@@ -4090,6 +4090,8 @@ class MainWindow(QMainWindow):
             levels.addAction(b)
             self.tray_bright[value] = b
         menu.addSeparator()
+        a = menu.addAction("Check for updates…")
+        a.triggered.connect(lambda: self._check_updates(True))
         a = menu.addAction("Quit (effects stop, colors stay)")
         a.triggered.connect(self._quit)
         self.tray_bright[min(self.tray_bright, key=lambda v: abs(v - self.director.master))].setChecked(True)
@@ -4175,6 +4177,10 @@ class MainWindow(QMainWindow):
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+        if not self.isVisible() and self.tray.isVisible():  # running in the tray: the window may open behind others
+            self.tray.showMessage(
+                APP_NAME, f"Version {release.version} is available.", QSystemTrayIcon.Information, 8000
+            )
 
     def _update_dialog_closed(self, _result: int = 0):
         dlg, self._update_dialog = self._update_dialog, None
