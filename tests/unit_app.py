@@ -13,6 +13,7 @@ os.environ["XDG_CONFIG_HOME"] = TMP
 os.environ["APPDATA"] = TMP  # Windows config root
 os.environ["HOME"] = TMP
 os.environ["RGBDECK_NO_BLUETOOTH"] = "1"
+os.environ["RGBDECK_NO_UPDATE_CHECK"] = "1"  # never ask GitHub from a test
 os.environ["RGBDECK_NO_DESKTOP_HOOKS"] = "1"  # tests never touch the radio
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -343,6 +344,85 @@ check(
     app_mod.remote_command(["rgbdeck", "--toggle"]) == "toggle" and app_mod.remote_command(["rgbdeck"]) is None,
     "command line: --toggle",
 )
+# updates: the dialog appears for a newer release; Later and Skip are remembered; Update restarts
+from rgbdeck import updater  # noqa: E402
+
+rel = updater.Release(
+    "9.9.9", "v9.9.9", "## 9.9.9\n\n- **Shiny** new thing\n- A fix", "https://example.invalid/r", "", {}
+)
+updater.install_kind = lambda *a, **k: "git"
+said = []
+app_mod.QMessageBox.information = staticmethod(lambda *a, **k: said.append(a[2]))
+app_mod.QMessageBox.warning = staticmethod(lambda *a, **k: said.append(a[2]))
+w._update_checked(None, "", True)
+check(said and "newest version" in said[-1], "asked by hand and up to date: says so")
+w._update_checked(None, "no network", True)
+check("no network" in said[-1], "asked by hand and offline: says why")
+n_said = len(said)
+w._update_checked(None, "no network", False)
+check(len(said) == n_said and w._update_dialog is None, "the daily check fails quietly")
+w._update_checked(rel, "", False)
+dlg = w._update_dialog
+check(
+    dlg is not None and dlg.isVisible() and "9.9.9" in dlg.windowTitle() + dlg.findChild(app_mod.QLabel).text(),
+    "a newer release opens the update dialog",
+)
+check(
+    "Shiny" in dlg.notes.toPlainText() and dlg.update_btn.text() == "Update now",
+    "with what is new and an Update now button",
+)
+dlg.later_btn.click()
+check(
+    w._update_dialog is None and w.settings["updates"]["later_until"] > time.time() + 3600, "Later: asks again tomorrow"
+)
+w._update_checked(rel, "", False)
+check(w._update_dialog is None, "and not before")
+w._update_checked(rel, "", True)
+check(w._update_dialog is not None, "unless asked by hand")
+w._update_dialog.skip_btn.click()
+w.settings["updates"]["later_until"] = 0
+w._update_checked(rel, "", False)
+check(w.settings["updates"]["skip"] == "9.9.9" and w._update_dialog is None, "Skip this version: not offered again")
+newer = updater.Release("10.0.0", "v10.0.0", "- more", "https://example.invalid/r", "", {})
+w._update_checked(newer, "", False)
+check(w._update_dialog is not None, "but the version after it is")
+dlg = w._update_dialog
+updater.apply = lambda release, kind, progress=None, relaunch=None: (_ for _ in ()).throw(
+    updater.UpdateError("disk full.")
+)
+dlg._update_now()
+for _ in range(100):
+    app.processEvents()
+    time.sleep(0.01)
+    if not dlg._busy:
+        break
+check(
+    "disk full" in dlg.status.text() and dlg.update_btn.isEnabled() and dlg.update_btn.text() == "Try again",
+    "a failed update is explained and can be retried",
+)
+quits = []
+w._quit = lambda: quits.append(1)
+updater.apply = lambda release, kind, progress=None, relaunch=None: (progress("Downloading", 50), ["relaunch-me"])[1]
+dlg._update_now()
+for _ in range(300):
+    app.processEvents()
+    time.sleep(0.01)
+    if quits:
+        break
+check(
+    quits == [1] and app_mod.RESTART_COMMAND == ["relaunch-me"],
+    "a finished update closes the app and hands over the restart command",
+)
+app_mod.RESTART_COMMAND = []
+del w._quit
+managed = app_mod.UpdateDialog(w, rel, "managed")
+check(
+    managed.update_btn.text() == "Open the download page" and "package manager" in managed.info.text(),
+    "a package-managed install is pointed to the download instead",
+)
+managed.close()
+w.settings.pop("updates", None)
+
 # automations: a per-app look takes over and hands back; away switches the lights off; a notification flashes
 auto = w.automation
 auto.configure(

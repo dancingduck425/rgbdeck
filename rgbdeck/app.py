@@ -30,6 +30,7 @@ from PySide6.QtCore import (
     QTime,
     Qt,
     QTimer,
+    QUrl,
     Signal,
     __version__ as QT_VERSION_STR,
 )
@@ -38,6 +39,7 @@ from PySide6.QtGui import (
     QActionGroup,
     QBrush,
     QColor,
+    QDesktopServices,
     QConicalGradient,
     QFont,
     QFontMetrics,
@@ -69,7 +71,9 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QTimeEdit,
     QTabWidget,
+    QTextBrowser,
     QPlainTextEdit,
+    QProgressBar,
     QListWidget,
     QMainWindow,
     QMenu,
@@ -102,6 +106,7 @@ from rgbdeck import __version__  # noqa: E402
 
 log = logging.getLogger("rgbdeck")
 IS_WINDOWS = sys.platform == "win32"
+RESTART_COMMAND: List[str] = []  # set by a finished update: main() runs it once this process has shut down
 
 
 from rgbdeck.paths import config_root as _config_root  # noqa: E402
@@ -125,7 +130,7 @@ def setup_logging(verbose: bool):
 
 from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
 from rgbdeck.hw import govee_lan, wled  # noqa: E402
-from rgbdeck import animations, audio, automation, remote, sensors  # noqa: E402
+from rgbdeck import animations, audio, automation, remote, sensors, updater  # noqa: E402
 from rgbdeck.director import Director  # noqa: E402
 from rgbdeck.effects import (  # noqa: E402
     EffectEngine,
@@ -1960,6 +1965,146 @@ class AnimateDialog(QDialog):
         save_json(SETTINGS_FILE, self.w.settings)
 
 
+class UpdateDialog(QDialog):
+    """A new version is out: what is in it, and Update now / Later / Skip this version."""
+
+    progressed = Signal(str, int)
+    applied = Signal(object, str)  # restart command, error text
+
+    def __init__(self, w: "MainWindow", release, kind: str):
+        super().__init__(w)
+        self.release, self.kind = release, kind
+        self.choice = "later"  # later | skip | updated (closing the window means "later")
+        self.restart_command: List[str] = []
+        self._busy = False
+        self.setWindowTitle("RGB Deck update")
+        self.setMinimumSize(600, 480)
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+        head = QLabel(f"⬆  RGB Deck {release.version} is available")
+        head.setObjectName("devTitle")
+        lay.addWidget(head)
+        sub = QLabel(
+            f"You have {updater.current_version()}. "
+            f"<a style='color:#8ab4ff' href='{release.page}'>Open the release page</a>"
+        )
+        sub.setOpenExternalLinks(True)
+        sub.setObjectName("hint")
+        lay.addWidget(sub)
+        lay.addWidget(QLabel("What's new"))
+        self.notes = QTextBrowser()
+        self.notes.setOpenExternalLinks(True)
+        self.notes.setMarkdown(release.notes)
+        lay.addWidget(self.notes, 1)
+        self.can_update = kind in updater.SELF_UPDATING
+        how = {
+            "git": "Update now runs “git pull” in this checkout and restarts RGB Deck.",
+            "source": "Update now downloads the new version, replaces the program files and restarts RGB Deck.",
+            "venv": "Update now installs the new version with pip and restarts RGB Deck.",
+            "windows-setup": "Update now downloads the new setup, installs it and starts RGB Deck again.",
+            "windows-portable": "Update now downloads the new RGBDeck.exe, puts it in place of this one and restarts.",
+        }.get(kind, updater.how_to_update_by_hand(kind))
+        self.info = QLabel(how + " Your presets and settings stay as they are.")
+        self.info.setWordWrap(True)
+        self.info.setObjectName("hint")
+        lay.addWidget(self.info)
+        self.bar = QProgressBar()
+        self.bar.setVisible(False)
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(8)
+        lay.addWidget(self.bar)
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        self.status.setVisible(False)
+        lay.addWidget(self.status)
+        row = QHBoxLayout()
+        self.skip_btn = QPushButton("Skip this version")
+        self.skip_btn.setToolTip("Don't offer this version again; you are told about the one after it")
+        self.skip_btn.clicked.connect(lambda: self._close_with("skip"))
+        row.addWidget(self.skip_btn)
+        row.addStretch(1)
+        self.later_btn = QPushButton("Later")
+        self.later_btn.setToolTip("Ask again tomorrow")
+        self.later_btn.clicked.connect(lambda: self._close_with("later"))
+        row.addWidget(self.later_btn)
+        self.update_btn = QPushButton("Update now" if self.can_update else "Open the download page")
+        self.update_btn.setObjectName("primary")
+        self.update_btn.setDefault(True)
+        self.update_btn.clicked.connect(self._update_now)
+        row.addWidget(self.update_btn)
+        lay.addLayout(row)
+        self.progressed.connect(self._progress)
+        self.applied.connect(self._applied)
+
+    def _close_with(self, choice: str):
+        self.choice = choice
+        self.accept()
+
+    def reject(self):  # Esc / the window's close button
+        if not self._busy:
+            super().reject()
+
+    def _update_now(self):
+        if not self.can_update:
+            QDesktopServices.openUrl(QUrl(self.release.page))
+            self._close_with("later")
+            return
+        self._busy = True
+        for b in (self.skip_btn, self.later_btn, self.update_btn):
+            b.setEnabled(False)
+        self.bar.setVisible(True)
+        self.bar.setRange(0, 0)
+        self.status.setVisible(True)
+        self.status.setStyleSheet("")
+        self.status.setText("Starting…")
+        release, kind, relaunch = self.release, self.kind, launch_command()
+
+        def work():
+            command, error = [], ""
+            try:
+                command = updater.apply(release, kind, lambda text, pct: self.progressed.emit(text, pct), relaunch)
+            except updater.UpdateError as e:
+                error = str(e)
+            except Exception as e:  # noqa: BLE001
+                log.exception("update failed")
+                error = f"unexpected error: {e}"
+            try:
+                self.applied.emit(command, error)
+            except RuntimeError:
+                pass
+
+        threading.Thread(target=work, name="rgbdeck-update", daemon=True).start()
+
+    def _progress(self, text: str, percent: int):
+        self.status.setText(f"{text}…" if percent < 0 else f"{text}… {percent} %")
+        if percent < 0:
+            self.bar.setRange(0, 0)
+        else:
+            self.bar.setRange(0, 100)
+            self.bar.setValue(percent)
+
+    def _applied(self, command, error: str):
+        self._busy = False
+        if error:
+            log.warning("update to %s failed: %s", self.release.version, error)
+            self.bar.setVisible(False)
+            self.status.setStyleSheet("color:#ff8f8f")
+            self.status.setText(
+                f"The update did not go through: {error} RGB Deck is unchanged. You can get the new version "
+                "from the release page linked above."
+            )
+            for b in (self.skip_btn, self.later_btn, self.update_btn):
+                b.setEnabled(True)
+            self.update_btn.setText("Try again")
+            return
+        self.bar.setRange(0, 100)
+        self.bar.setValue(100)
+        self.status.setText(f"RGB Deck {self.release.version} is installed. Restarting…")
+        self.restart_command = list(command)
+        self.choice = "updated"
+        QTimer.singleShot(900, self.accept)
+
+
 class AutomationsDialog(QDialog):
     """Schedule, lights off while away, notification flashes, per-app looks."""
 
@@ -2231,6 +2376,13 @@ class SettingsDialog(QDialog):
             sc.setWordWrap(True)
             sc.setObjectName("hint")
             form.addRow("Shortcuts", sc)
+        self.updates = QCheckBox("Tell me when a new version is out (asks GitHub once a day)")
+        self.updates.setChecked((settings.get("updates") or {}).get("auto", True))
+        self.updates.setToolTip(
+            "One request to this project's GitHub page; nothing about you is sent, and nothing is installed\n"
+            "unless you press Update. Help → Check for updates… asks right away."
+        )
+        form.addRow("Updates", self.updates)
         rc = dict(settings.get("remote") or {})
         self._remote_token = rc.get("token") or remote.new_token()
         self.remote_on = QCheckBox("Phone page: control the lights from a phone on your home network")
@@ -2302,6 +2454,7 @@ class SettingsDialog(QDialog):
             "token": self._remote_token,
             "port": remote.DEFAULT_PORT,
         }
+        self.settings["updates"] = {**(self.settings.get("updates") or {}), "auto": self.updates.isChecked()}
         self.settings["sync"] = self.sync.isChecked()
         self.settings["fx_fps"] = self.fps.value()
         self.settings["keep_on_close"] = self.keep.isChecked()
@@ -2403,6 +2556,7 @@ class _AutomationHost:
 class MainWindow(QMainWindow):
     scanFinished = Signal()
     hotkeyPressed = Signal(str)
+    updateChecked = Signal(object, str, bool)  # release (or None), error text, asked for by hand
     batteryRead = Signal(str, object)
 
     def __init__(self, client: LocalBackend):
@@ -2466,6 +2620,14 @@ class MainWindow(QMainWindow):
         self.automation = automation.create(_AutomationHost(self), self)
         self.automation.status.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.automation.configure(self.settings.get("automation") or {})
+        self._update_dialog: Optional[UpdateDialog] = None
+        self._update_checking = False
+        self.updateChecked.connect(self._update_checked)
+        updater.cleanup_leftovers()
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(self._maybe_check_updates)
+        self._update_timer.start(30 * 60 * 1000)
+        QTimer.singleShot(25000, self._maybe_check_updates)
         self._remote_bridge = _RemoteBridge(self.director, self)
         self.remote: Optional[remote.Remote] = None
         self._apply_remote_setting()
@@ -2756,6 +2918,9 @@ class MainWindow(QMainWindow):
         h.addAction(a)
         a = QAction("Open log file", self)
         a.triggered.connect(lambda: open_in_desktop(LOG_FILE))
+        h.addAction(a)
+        a = QAction("Check for updates…", self)
+        a.triggered.connect(lambda: self._check_updates(True))
         h.addAction(a)
         h.addSeparator()
         a = QAction("About RGB Deck", self)
@@ -3933,6 +4098,101 @@ class MainWindow(QMainWindow):
         self.tray.activated.connect(lambda r: self._toggle_from_tray() if r == QSystemTrayIcon.Trigger else None)
         self.tray.show()
 
+    # ------------------------------------------------------- updates
+    def _maybe_check_updates(self):
+        """Once a day, if the user left it on (Settings)."""
+        cfg = self.settings.get("updates") or {}
+        if not cfg.get("auto", True) or os.environ.get("RGBDECK_NO_UPDATE_CHECK"):
+            return
+        if time.time() - float(cfg.get("last_check", 0)) >= updater.CHECK_EVERY:
+            self._check_updates(False)
+
+    def _check_updates(self, manual: bool = True):
+        if self._update_checking:
+            return
+        self._update_checking = True
+        if manual:
+            self.statusBar().showMessage("Asking GitHub for the newest version…", 5000)
+
+        def work():
+            release, error = None, ""
+            try:
+                release = updater.check()
+            except updater.UpdateError as e:
+                error = str(e)
+            except Exception as e:  # noqa: BLE001 - never let a check take the app down
+                log.exception("update check failed")
+                error = str(e)
+            try:
+                self.updateChecked.emit(release, error, manual)
+            except RuntimeError:
+                pass  # the window is gone
+
+        threading.Thread(target=work, name="rgbdeck-update-check", daemon=True).start()
+
+    def _update_checked(self, release, error: str, manual: bool):
+        self._update_checking = False
+        cfg = dict(self.settings.get("updates") or {})
+        if error:
+            log.info("update check: %s", error)
+            if manual:
+                QMessageBox.warning(self, "Check for updates", f"Could not check for updates: {error}.")
+            return
+        cfg["last_check"] = time.time()
+        self.settings["updates"] = cfg
+        save_json(SETTINGS_FILE, self.settings)
+        if release is None:
+            if manual:
+                QMessageBox.information(
+                    self, "Check for updates", f"You have the newest version (RGB Deck {updater.current_version()})."
+                )
+            return
+        kind = updater.install_kind()
+        if kind.startswith("windows") and release.asset(kind) is None:
+            if manual:  # the downloads are built a few minutes after a release is published
+                QMessageBox.information(
+                    self,
+                    "Check for updates",
+                    f"RGB Deck {release.version} has just been released and its download is still being built. "
+                    "Try again in a few minutes.",
+                )
+            else:
+                cfg["last_check"] = time.time() - updater.CHECK_EVERY + 900  # look again in a quarter of an hour
+                save_json(SETTINGS_FILE, self.settings)
+            return
+        if not manual and (cfg.get("skip") == release.version or time.time() < float(cfg.get("later_until", 0))):
+            return
+        log.info("update available: %s (this is %s, %s installation)", release.version, updater.current_version(), kind)
+        self._show_update(release, kind)
+
+    def _show_update(self, release, kind: str):
+        if self._update_dialog is not None:
+            self._update_dialog.raise_()
+            self._update_dialog.activateWindow()
+            return
+        dlg = self._update_dialog = UpdateDialog(self, release, kind)
+        dlg.finished.connect(self._update_dialog_closed)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _update_dialog_closed(self, _result: int = 0):
+        dlg, self._update_dialog = self._update_dialog, None
+        if dlg is None:
+            return
+        cfg = dict(self.settings.get("updates") or {})
+        if dlg.choice == "skip":
+            cfg["skip"] = dlg.release.version
+        elif dlg.choice == "later":
+            cfg["later_until"] = time.time() + updater.CHECK_EVERY
+        self.settings["updates"] = cfg
+        save_json(SETTINGS_FILE, self.settings)
+        dlg.deleteLater()
+        if dlg.choice == "updated":
+            global RESTART_COMMAND
+            RESTART_COMMAND = list(dlg.restart_command)
+            self._quit()
+
     def _apply_remote_setting(self):
         """Start / stop the phone page as Settings say."""
         cfg = self.settings.get("remote") or {}
@@ -4338,6 +4598,16 @@ def main(argv: List[str]) -> int:
     client.shutdown()
     if w._ctl is not None:
         forget_control_file()
+    if RESTART_COMMAND:  # an update was installed: start the new version now that this one is out of the way
+        log.info("restarting after the update: %s", RESTART_COMMAND[0])
+        env = {k: v for k, v in os.environ.items() if k != "RGBDECK_PRETEND_VERSION"}
+        try:
+            if IS_WINDOWS:
+                subprocess.Popen(RESTART_COMMAND, env=env, creationflags=0x00000008 | 0x08000000, close_fds=True)
+            else:
+                subprocess.Popen(RESTART_COMMAND, env=env, start_new_session=True, close_fds=True)
+        except OSError as e:
+            log.error("could not restart: %s", e)
     return rc
 
 

@@ -109,6 +109,21 @@ On KDE they appear under *System Settings → Shortcuts → RGB Deck* (they are 
 bind the commands yourself. On Windows tick **Settings → Global shortcuts** for Ctrl+Alt+F9 (lights off/on),
 F10 (next preset), F11 / F12 (dimmer / brighter).
 
+### Updates
+
+Once a day RGB Deck asks this project's GitHub page whether a newer version exists (one request, nothing about
+you is sent; switch it off under **Settings → Updates**). When there is one, a window shows what is new, with:
+
+- **Update now**: installs it and restarts the app. A Windows installation downloads the new setup (or the new
+  `RGBDeck.exe` for the portable one) and checks it against the SHA-256 GitHub lists before running it; a git
+  checkout runs `git pull`; a source folder set up with `install.sh` gets its program files swapped (and put
+  back if anything fails); a pip / pipx environment is updated with pip.
+- **Later**: asks again tomorrow.
+- **Skip this version**: stays quiet until the version after it.
+
+A copy installed by a package manager or system-wide is never touched: the window then links to the download.
+**Help → Check for updates…** asks right away. Presets and settings are not affected by an update.
+
 ### Phone page
 
 **Settings → Phone page** starts a small web page on port 8765 and shows its link; open it on a phone that is on

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.0 — 2026-11-10
+
+- **Updater.** Once a day (Settings → Updates, on by default) the app asks GitHub for the newest release. When
+  there is one, a window shows the notes of every version since yours and offers **Update now**, **Later**
+  (ask again tomorrow) and **Skip this version**. Update now replaces this installation and restarts the app:
+  the Windows setup or portable exe is downloaded and verified against the SHA-256 GitHub publishes, a git
+  checkout is pulled (never over local changes), an `install.sh` source folder gets its package swapped with
+  rollback, a pip / pipx environment is upgraded with pip. Package-managed copies are only pointed to the
+  download. Downloads are accepted from this project's repository only.
+- **Help → Check for updates…** asks right away.
+- The Windows paths are covered by tests with stand-in files but have not run on a real Windows machine.
+
 ## 1.8.2 — 2026-11-10
 
 Memory: 149 MB → 102 MB resident on the author's Plasma desktop (the app's own share 53 → 35 MB).
