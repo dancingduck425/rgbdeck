@@ -21,6 +21,8 @@ background daemon, no third-party RGB software.
 - **Automations** (File → Automations…): lights off while the screen is locked or the PC sleeps, dimming or
   presets at set times, a flash in a program's color when it sends a notification, and a preset of its own
   while a chosen program or game is in front.
+- **Phone page**: switch it on in Settings and open the link on a phone on your home network for lights off / on,
+  brightness, colors, presets and animations.
 - **Govee lights** over Wi-Fi or Bluetooth: color, per-segment painting, whites, built-in scenes, and a pulse on
   every key press while a typing effect runs. **WLED** strips are found on the network by themselves.
 - **Presets**, apply-at-login, tray icon, single instance.
@@ -106,6 +108,14 @@ With RGB Deck running (the tray is enough), these talk to it:
 On KDE they appear under *System Settings → Shortcuts → RGB Deck* (they are desktop actions); on other desktops
 bind the commands yourself. On Windows tick **Settings → Global shortcuts** for Ctrl+Alt+F9 (lights off/on),
 F10 (next preset), F11 / F12 (dimmer / brighter).
+
+### Phone page
+
+**Settings → Phone page** starts a small web page on port 8765 and shows its link; open it on a phone that is on
+the same network (bookmark it or add it to the home screen). It is off by default, answers only devices on your
+home network, and every request has to carry the secret from the link — *New link* replaces it. A firewall on
+the PC has to allow it, e.g. `sudo ufw allow proto tcp from 192.168.0.0/16 to any port 8765`. The page can
+switch lights, nothing else, and is plain HTTP: fine at home, not something to expose to the internet.
 
 ## Install
 

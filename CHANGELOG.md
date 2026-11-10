@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.0 — 2026-11-10
+
+- **Phone page** (Settings → Phone page, off by default): a small page on port 8765 for a phone on the home
+  network — lights off / on, brightness, color, presets, animations. Only private-network clients are answered
+  and every request needs the secret in the link; the page can run eight lighting commands and nothing else.
+  Verified here by driving the keyboard and the Govee strip through it over the LAN address.
+
 ## 1.7.0 — 2026-11-10
 
 **Automations** (File → Automations…), all off until you switch them on:

@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Set
 
 from PySide6.QtCore import (
     QCoreApplication,
+    QObject,
     QPointF,
     QRect,
     QRectF,
@@ -125,7 +126,7 @@ def setup_logging(verbose: bool):
 
 from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
 from rgbdeck.hw import govee_lan, wled  # noqa: E402
-from rgbdeck import animations, audio, automation, sensors  # noqa: E402
+from rgbdeck import animations, audio, automation, remote, sensors  # noqa: E402
 from rgbdeck.director import Director  # noqa: E402
 from rgbdeck.effects import (  # noqa: E402
     EffectEngine,
@@ -2215,6 +2216,26 @@ class SettingsDialog(QDialog):
             sc.setWordWrap(True)
             sc.setObjectName("hint")
             form.addRow("Shortcuts", sc)
+        rc = dict(settings.get("remote") or {})
+        self._remote_token = rc.get("token") or remote.new_token()
+        self.remote_on = QCheckBox("Phone page: control the lights from a phone on your home network")
+        self.remote_on.setChecked(bool(rc.get("on")))
+        self.remote_on.setToolTip(
+            "Serves a small page on port 8765 to devices on your home network only. Whoever has the link can\n"
+            "switch your lights; nothing else. A firewall on this PC has to allow incoming TCP 8765 from your network."
+        )
+        self.remote_on.toggled.connect(self._show_remote_link)
+        form.addRow("Phone", self.remote_on)
+        self.remote_link = QLineEdit()
+        self.remote_link.setReadOnly(True)
+        new_link = QPushButton("New link")
+        new_link.setToolTip("Makes the old link stop working")
+        new_link.clicked.connect(self._new_remote_link)
+        row = QHBoxLayout()
+        row.addWidget(self.remote_link, 1)
+        row.addWidget(new_link)
+        form.addRow("", row)
+        self._show_remote_link()
         net = govee_lan.get_settings()
         self.network_changed = False
         self.govee = QCheckBox("Find Govee lights on my network")
@@ -2250,7 +2271,22 @@ class SettingsDialog(QDialog):
         bb.rejected.connect(self.reject)
         form.addRow(bb)
 
+    def _show_remote_link(self, *_a):
+        on = self.remote_on.isChecked()
+        link = f"http://{remote.lan_address()}:{remote.DEFAULT_PORT}/?k={self._remote_token}"
+        self.remote_link.setText(link if on else "")
+        self.remote_link.setPlaceholderText("Switch it on to get the link to open on your phone")
+
+    def _new_remote_link(self):
+        self._remote_token = remote.new_token()
+        self._show_remote_link()
+
     def apply(self) -> dict:
+        self.settings["remote"] = {
+            "on": self.remote_on.isChecked(),
+            "token": self._remote_token,
+            "port": remote.DEFAULT_PORT,
+        }
         self.settings["sync"] = self.sync.isChecked()
         self.settings["fx_fps"] = self.fps.value()
         self.settings["keep_on_close"] = self.keep.isChecked()
@@ -2301,6 +2337,30 @@ class _DirectorHost:
 
     def shown_base(self, dev: Device) -> List[int]:
         return self.w._shown_base(dev)
+
+
+class _RemoteBridge(QObject):
+    """Lets the phone page's HTTP threads run a command on the GUI thread and wait for its reply."""
+
+    ask = Signal(object)
+
+    def __init__(self, director: Director, parent=None):
+        super().__init__(parent)
+        self._director = director
+        self.ask.connect(self._run)  # emitted from another thread: delivered through the event loop
+
+    def call(self, text: str) -> str:
+        box = {"reply": "no RGB Deck is busy, try again", "done": threading.Event()}
+        self.ask.emit((text, box))
+        box["done"].wait(3.0)
+        return box["reply"]
+
+    def _run(self, item):
+        text, box = item
+        try:
+            box["reply"] = self._director.command(text)
+        finally:
+            box["done"].set()
 
 
 class _AutomationHost:
@@ -2386,6 +2446,9 @@ class MainWindow(QMainWindow):
         self.automation = automation.create(_AutomationHost(self), self)
         self.automation.status.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.automation.configure(self.settings.get("automation") or {})
+        self._remote_bridge = _RemoteBridge(self.director, self)
+        self.remote: Optional[remote.Remote] = None
+        self._apply_remote_setting()
         self._hotkeys: Optional[WindowsHotkeys] = None
         self.hotkeyPressed.connect(self.director.command)
         self._apply_hotkey_setting()
@@ -3654,6 +3717,7 @@ class MainWindow(QMainWindow):
         self.settings.update(dlg.apply())
         save_json(SETTINGS_FILE, self.settings)
         self._apply_hotkey_setting()
+        self._apply_remote_setting()
         self.sync_chk.setChecked(self.settings.get("sync", True))
         if self.engine:
             self.engine.settings.fps = int(self.settings.get("fx_fps", 24))
@@ -3804,6 +3868,24 @@ class MainWindow(QMainWindow):
         self.tray.activated.connect(lambda r: self._toggle_from_tray() if r == QSystemTrayIcon.Trigger else None)
         self.tray.show()
 
+    def _apply_remote_setting(self):
+        """Start / stop the phone page as Settings say."""
+        cfg = self.settings.get("remote") or {}
+        if self.remote is not None and (
+            not cfg.get("on")
+            or self.remote.token != cfg.get("token")
+            or self.remote.port != cfg.get("port", remote.DEFAULT_PORT)
+        ):
+            self.remote.stop()
+            self.remote = None
+        if cfg.get("on") and cfg.get("token") and self.remote is None:
+            self.remote = remote.Remote(
+                self._remote_bridge.call, cfg["token"], int(cfg.get("port", remote.DEFAULT_PORT))
+            )
+            if not self.remote.start():
+                self.statusBar().showMessage(f"The phone page could not start: {self.remote.error}", 10000)
+                self.remote = None
+
     def _apply_hotkey_setting(self):
         want = IS_WINDOWS and bool(self.settings.get("hotkeys", False))
         if want and self._hotkeys is None:
@@ -3877,6 +3959,9 @@ class MainWindow(QMainWindow):
             return
         self._stop_app_effect()
         self.automation.shutdown()
+        if self.remote is not None:
+            self.remote.stop()
+            self.remote = None
         status, self._anim_status = self._anim_status, {}
         self._set_animation(None, remember=False)  # devices go back to their own colors; it resumes next start
         self._anim_status = status
