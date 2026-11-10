@@ -111,7 +111,8 @@ F10 (next preset), F11 / F12 (dimmer / brighter).
 
 ### Updates
 
-Once a day RGB Deck asks this project's GitHub page whether a newer version exists (one request, nothing about
+Every time it starts, and once a day while it keeps running, RGB Deck asks this project's GitHub page whether a
+newer version exists (one request, nothing about
 you is sent; switch it off under **Settings → Updates**). When there is one, a window shows what is new, with:
 
 - **Update now**: installs it and restarts the app. A Windows installation downloads the new setup (or the new

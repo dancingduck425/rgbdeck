@@ -415,6 +415,23 @@ check(
 )
 app_mod.RESTART_COMMAND = []
 del w._quit
+asked = []
+w._check_updates = lambda manual=True: asked.append(manual)
+del os.environ["RGBDECK_NO_UPDATE_CHECK"]
+w.settings["updates"] = {"auto": True, "last_check": time.time()}  # checked a moment ago
+w._startup_update_check()
+check(asked == [False], "every start asks, however recent the last check")
+w._maybe_check_updates()
+check(asked == [False], "while running, only once a day")
+w.settings["updates"]["last_check"] = time.time() - 30 * 3600
+w._maybe_check_updates()
+check(asked == [False, False], "a day later the running app asks again")
+w.settings["updates"]["auto"] = False
+w._startup_update_check()
+w._maybe_check_updates()
+check(asked == [False, False], "switched off in Settings: never")
+os.environ["RGBDECK_NO_UPDATE_CHECK"] = "1"
+del w._check_updates
 managed = app_mod.UpdateDialog(w, rel, "managed")
 check(
     managed.update_btn.text() == "Open the download page" and "package manager" in managed.info.text(),

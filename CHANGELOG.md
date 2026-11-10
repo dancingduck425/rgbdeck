@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.2 — 2026-11-10
+
+- **The update check runs at every start**, right after the devices are found (before: 25 seconds in, and only
+  if the last check was more than 20 hours ago). While the app keeps running it still asks once a day.
+  "Later" still means tomorrow and "Skip this version" still holds, so starting the app often does not nag.
+
 ## 1.9.1 — 2026-11-10
 
 - **Check for updates…** is in the tray menu too.

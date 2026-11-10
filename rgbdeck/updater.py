@@ -5,7 +5,8 @@ Finds out whether a newer RGB Deck has been released and, where this installatio
 installs it.
 
 What is asked: one HTTPS request to GitHub's public API for this project's releases (no account, nothing about
-the user is sent beyond what any web request carries). When: once a day while the app runs, if the setting is on.
+the user is sent beyond what any web request carries). When: at every start and once a day while the app keeps
+running, if the setting is on.
 
 How an update is applied depends on how this copy was installed:
 

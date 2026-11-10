@@ -2376,7 +2376,7 @@ class SettingsDialog(QDialog):
             sc.setWordWrap(True)
             sc.setObjectName("hint")
             form.addRow("Shortcuts", sc)
-        self.updates = QCheckBox("Tell me when a new version is out (asks GitHub once a day)")
+        self.updates = QCheckBox("Tell me when a new version is out (asks GitHub at start and once a day)")
         self.updates.setChecked((settings.get("updates") or {}).get("auto", True))
         self.updates.setToolTip(
             "One request to this project's GitHub page; nothing about you is sent, and nothing is installed\n"
@@ -2627,7 +2627,7 @@ class MainWindow(QMainWindow):
         self._update_timer = QTimer(self)
         self._update_timer.timeout.connect(self._maybe_check_updates)
         self._update_timer.start(30 * 60 * 1000)
-        QTimer.singleShot(25000, self._maybe_check_updates)
+        self._update_startup_pending = True  # one check right after the first device scan of every start
         self._remote_bridge = _RemoteBridge(self.director, self)
         self.remote: Optional[remote.Remote] = None
         self._apply_remote_setting()
@@ -3871,6 +3871,9 @@ class MainWindow(QMainWindow):
         self.base_colors = {d.index: list(d.colors) for d in self.client.devices}
         self.dim = {d.index: self.dim.get(d.index, 100) for d in self.client.devices}
         self._populate_devices()
+        if self._update_startup_pending:
+            self._update_startup_pending = False
+            QTimer.singleShot(1500, self._startup_update_check)  # devices first, then the question to GitHub
         self.director.forget()
         self._anim_pos.clear()
         self._anim_last.clear()
@@ -4101,12 +4104,20 @@ class MainWindow(QMainWindow):
         self.tray.show()
 
     # ------------------------------------------------------- updates
+    def _updates_wanted(self) -> bool:
+        return bool((self.settings.get("updates") or {}).get("auto", True)) and not os.environ.get(
+            "RGBDECK_NO_UPDATE_CHECK"
+        )
+
+    def _startup_update_check(self):
+        """Every start asks once, whenever the last check was (if the user left it on in Settings)."""
+        if self._updates_wanted():
+            self._check_updates(False)
+
     def _maybe_check_updates(self):
-        """Once a day, if the user left it on (Settings)."""
+        """While the app keeps running (it may sit in the tray for weeks): once a day."""
         cfg = self.settings.get("updates") or {}
-        if not cfg.get("auto", True) or os.environ.get("RGBDECK_NO_UPDATE_CHECK"):
-            return
-        if time.time() - float(cfg.get("last_check", 0)) >= updater.CHECK_EVERY:
+        if self._updates_wanted() and time.time() - float(cfg.get("last_check", 0)) >= updater.CHECK_EVERY:
             self._check_updates(False)
 
     def _check_updates(self, manual: bool = True):
