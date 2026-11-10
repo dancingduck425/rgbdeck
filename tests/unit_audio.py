@@ -25,14 +25,7 @@ def tone(freq, amp=12000, n=audio.WINDOW, phase=0):
     )
 
 
-for use_numpy in (False, True):
-    if use_numpy and audio._np is None:
-        print("SKIP numpy path (numpy not installed)")
-        continue
-    saved = audio._np
-    if not use_numpy:
-        audio._np = None
-    how = "numpy" if use_numpy else "pure Python"
+for how in ("pure Python",):
     a = audio.Analyzer()
     for k in range(20):
         a.feed(tone(1000, phase=k * audio.WINDOW), now=k * 0.023)
@@ -60,7 +53,6 @@ for use_numpy in (False, True):
         if a.levels(now=k * 0.023).beat == 1.0:
             beats += 1
     check(4 <= beats <= 7, f"{how}: kicks are counted as beats ({beats} of 6)")
-    audio._np = saved
 
 a = audio.Analyzer()
 a.feed(tone(1000), now=0.0)

@@ -20,17 +20,15 @@ GUI thread (see app.py), returning its reply.
 
 from __future__ import annotations
 
-import hmac
+import base64
 import ipaddress
 import json
 import logging
-import secrets
+import os
 import socket
 import sys
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable, Optional
-from urllib.parse import parse_qs, urlparse
+from typing import Callable
 
 log = logging.getLogger("rgbdeck.remote")
 
@@ -120,12 +118,6 @@ state(); setInterval(state, 4000);
 """
 
 
-class _Server(ThreadingHTTPServer):
-    # On Windows "reuse address" would let a second program take the port over while we hold it.
-    allow_reuse_address = sys.platform != "win32"
-    daemon_threads = True
-
-
 def allowed_client(address: str) -> bool:
     """Only the home network may talk to the page: private, link-local or loopback addresses."""
     try:
@@ -138,7 +130,7 @@ def allowed_client(address: str) -> bool:
 
 
 def new_token() -> str:
-    return secrets.token_urlsafe(12)
+    return base64.urlsafe_b64encode(os.urandom(12)).decode().rstrip("=")
 
 
 def lan_address() -> str:
@@ -157,7 +149,7 @@ def lan_address() -> str:
 class Remote:
     def __init__(self, call: Callable[[str], str], token: str, port: int = DEFAULT_PORT, host: str = "0.0.0.0"):
         self.call, self.token, self.port, self.host = call, token, port, host
-        self._server: Optional[ThreadingHTTPServer] = None
+        self._server = None  # http.server.ThreadingHTTPServer while running
         self.error = ""
 
     @property
@@ -170,6 +162,17 @@ class Remote:
     def start(self) -> bool:
         if self._server is not None:
             return True
+        # imported here: http.server and what it pulls in cost about 6 MB that most users never need
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class _Server(ThreadingHTTPServer):
+            # On Windows "reuse address" would let a second program take the port over while we hold it.
+            allow_reuse_address = sys.platform != "win32"
+            daemon_threads = True
+
+        from hmac import compare_digest  # constant-time comparison; imported with the server, not at start
+        from urllib.parse import parse_qs, urlparse
+
         remote = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -196,7 +199,7 @@ class Remote:
                 """The request's path if the caller may ask at all, else None (403 already sent)."""
                 url = urlparse(self.path)
                 key = (parse_qs(url.query).get("k") or [""])[0]
-                ok = allowed_client(self.client_address[0]) and hmac.compare_digest(key.encode(), remote.token.encode())
+                ok = allowed_client(self.client_address[0]) and compare_digest(key.encode(), remote.token.encode())
                 if not ok:
                     self._answer(403, b"forbidden", "text/plain")
                     return None

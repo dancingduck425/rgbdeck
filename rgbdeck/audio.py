@@ -9,8 +9,9 @@ The sound is taken from the output side (what goes to the speakers), never from 
     Windows   WASAPI loopback through the optional `soundcard` package
 
 Analysis is cheap on purpose: one Goertzel filter per band over the last 512 samples (23 ms at 22.05 kHz),
-with numpy's FFT used instead when numpy happens to be installed. Levels are normalised against a slowly
-falling peak, so quiet and loud music both fill the range.
+about a tenth of a millisecond per window in plain Python. (An FFT through numpy was no faster to notice and
+cost 19 MB of memory just for being imported.) Levels are normalised against a slowly falling peak, so quiet
+and loud music both fill the range.
 """
 
 from __future__ import annotations
@@ -33,11 +34,6 @@ WINDOW = 512
 BANDS = (60.0, 130.0, 260.0, 520.0, 1000.0, 2000.0, 4000.0, 8000.0)  # centre frequencies, Hz
 TILT = (1.0, 1.0, 1.1, 1.3, 1.6, 2.0, 2.6, 3.4)
 SILENCE = 60.0  # mean magnitude (of 32768) below which nothing is playing
-
-try:  # optional: a real FFT when numpy is around
-    import numpy as _np
-except Exception:  # noqa: BLE001
-    _np = None
 
 
 class Levels:
@@ -68,13 +64,6 @@ class Analyzer:
 
     def _magnitudes(self, samples: Tuple[int, ...]) -> List[float]:
         n = len(samples)
-        if _np is not None:
-            spec = _np.abs(_np.fft.rfft(_np.asarray(samples, dtype=_np.float32) * _np.hanning(n))) / n
-            out = []
-            for f in BANDS:
-                lo, hi = int(f / 1.41 * n / self.rate), int(f * 1.41 * n / self.rate) + 1
-                out.append(float(spec[max(1, lo) : max(2, hi)].max()) * 2.0)
-            return out
         if len(self._hann) != n:
             self._hann = [0.5 - 0.5 * math.cos(2.0 * math.pi * i / (n - 1)) for i in range(n)]
         windowed = [x * h for x, h in zip(samples, self._hann)]

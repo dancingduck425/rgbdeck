@@ -11,7 +11,6 @@ import logging
 import math
 import os
 import random
-import secrets
 import socket
 import subprocess
 import sys
@@ -197,7 +196,7 @@ def control_listen() -> Optional[socket.socket]:
             return None
         sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sk.bind(("127.0.0.1", 0))
-        CONTROL_TOKEN = secrets.token_hex(16)
+        CONTROL_TOKEN = os.urandom(16).hex()  # the kernel's random source, without loading the crypto library
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         CONTROL_FILE.write_text(json.dumps({"port": sk.getsockname()[1], "token": CONTROL_TOKEN}))
     else:
@@ -4316,6 +4315,11 @@ def main(argv: List[str]) -> int:
         return 0
     setup_logging("--verbose" in argv or "-v" in argv)
     log.info("RGB Deck starting")
+    if sys.platform.startswith("linux") and not os.environ.get("RGBDECK_NATIVE_THEME"):
+        # The desktop's own Qt theme plugin (KDE's loads Qt Quick, QML and three dozen framework libraries, GTK's
+        # loads GTK) costs about 20 MB and gives this app nothing: it paints itself and has no file dialogs.
+        # Qt's built-in theme still provides the tray icon and its menu.
+        os.environ.setdefault("QT_QPA_PLATFORMTHEME", "generic")
     app = QApplication([a for a in argv if a not in ("--tray", "--verbose", "-v")])
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName("rgbdeck")

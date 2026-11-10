@@ -27,8 +27,6 @@ import socket
 import struct
 import threading
 import time
-import urllib.error
-import urllib.request
 from typing import Dict, List, Optional
 
 from rgbdeck import paths
@@ -105,6 +103,9 @@ def _save_config():
 
 # ----------------------------------------------------------------------------- talking to a controller
 def _http(ip: str, path: str, body: Optional[dict] = None, port: Optional[int] = None) -> Optional[dict]:
+    import urllib.error  # here, not at the top: urllib.request drags in ssl and friends (about 5 MB)
+    import urllib.request
+
     url = f"http://{ip}:{port or HTTP_PORT}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"} if data else {})

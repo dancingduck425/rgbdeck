@@ -180,10 +180,15 @@ the same keyboard confuse each other.
 
 ## Resource use
 
-Measured on the author's machine (Plasma, three devices): 0.0 % CPU idle, about 1 % of one core while a
-typing effect is rendering at 24 fps. Unique memory about 45 MB (the larger "RSS" figure in task managers
-is mostly Qt / desktop libraries shared with other apps). `rgbdeck --apply` (what the login entry runs)
-needs no Qt at all, ~20 MB, and exits once the look is applied.
+Measured on the author's machine (Plasma on Wayland, keyboard + mouse + mainboard + a Govee strip over
+Bluetooth, version 1.8.2): 0.0–0.2 % CPU idle in the tray, about 1 % of one core while an animation or a typing
+effect renders at 24 fps. Memory about 100 MB as task managers show it ("RSS"), of which about 35 MB is the
+app's own; the rest is Qt and system libraries, read from disk and shared with other programs.
+`rgbdeck --apply` (what the login entry runs) peaks around 60 MB and exits once the look is applied, unless
+the preset carries a typing effect or an animation, which it then keeps playing.
+
+On Linux the app skips the desktop's Qt theme plugin (it paints itself; KDE's plugin alone loads three dozen
+libraries, about 20 MB). Set `RGBDECK_NATIVE_THEME=1` to load it anyway.
 
 ## Keyboard shortcuts
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.2 — 2026-11-10
+
+Memory: 149 MB → 102 MB resident on the author's Plasma desktop (the app's own share 53 → 35 MB).
+
+- numpy is no longer imported for the music analysis (19 MB for a filter that takes 0.1 ms in plain Python).
+- The phone page's HTTP server and WLED's URL library load when they are first used, not at start (10 MB).
+- Linux: the desktop's Qt theme plugin is not loaded (about 22 MB on KDE; the tray icon and its menu come
+  from Qt's built-in theme). `RGBDECK_NATIVE_THEME=1` brings it back.
+- The control token comes from `os.urandom` instead of pulling in the crypto library.
+- README: the resource figures are re-measured; the old claim that `--apply` runs without Qt in 20 MB was wrong.
+
 ## 1.8.1 — 2026-11-10
 
 Found by driving the real window through every tab, chip, dialog, drag and animation while timing the UI:
