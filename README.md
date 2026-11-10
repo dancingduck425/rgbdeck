@@ -18,6 +18,9 @@ background daemon, no third-party RGB software.
   is playing (the output is tapped, never a microphone).
 - **PC status colors**: any device can show CPU / GPU temperature or CPU load, blue when cool to red when hot;
   a red flash warns when a wireless mouse runs low.
+- **Automations** (File → Automations…): lights off while the screen is locked or the PC sleeps, dimming or
+  presets at set times, a flash in a program's color when it sends a notification, and a preset of its own
+  while a chosen program or game is in front.
 - **Govee lights** over Wi-Fi or Bluetooth: color, per-segment painting, whites, built-in scenes, and a pulse on
   every key press while a typing effect runs. **WLED** strips are found on the network by themselves.
 - **Presets**, apply-at-login, tray icon, single instance.

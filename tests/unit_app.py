@@ -12,7 +12,8 @@ TMP = tempfile.mkdtemp(prefix="rgbdeck-unit-")
 os.environ["XDG_CONFIG_HOME"] = TMP
 os.environ["APPDATA"] = TMP  # Windows config root
 os.environ["HOME"] = TMP
-os.environ["RGBDECK_NO_BLUETOOTH"] = "1"  # tests never touch the radio
+os.environ["RGBDECK_NO_BLUETOOTH"] = "1"
+os.environ["RGBDECK_NO_DESKTOP_HOOKS"] = "1"  # tests never touch the radio
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import rgbdeck.backend as backend  # noqa: E402
@@ -338,6 +339,64 @@ check(
     app_mod.remote_command(["rgbdeck", "--toggle"]) == "toggle" and app_mod.remote_command(["rgbdeck"]) is None,
     "command line: --toggle",
 )
+# automations: a per-app look takes over and hands back; away switches the lights off; a notification flashes
+auto = w.automation
+auto.configure(
+    {
+        "away": True,
+        "notify": {"on": True, "color": 0xFFFFFF, "apps": {"discord": 0x0000FF}, "mute": ["spotify"]},
+        "profiles": [{"app": "game", "preset": "Two"}],
+        "schedule": [{"at": "22:00", "do": "dim 30"}],
+    }
+)
+w._flush()
+client.wait_idle()
+green = [rgb_to_u32(0, 255, 0)] * 3
+w.presets["Two"]["devices"][1]["colors"] = [rgb_to_u32(9, 9, 9)] * 3
+auto.focus_changed("steam_app_game_123")
+client.wait_idle()
+check(painted.writes[-1] == [rgb_to_u32(9, 9, 9)] * 3, f"program in front: its preset shows ({painted.writes[-1]})")
+auto.focus_changed("org.kde.dolphin")
+client.wait_idle()
+check(painted.writes[-1] == green, f"leaving it brings the previous look back ({painted.writes[-1]})")
+auto.away_changed(True)
+client.wait_idle()
+check(w.director.dark and painted.writes[-1] == [0, 0, 0], "screen locked: lights off")
+auto.away_changed(False)
+client.wait_idle()
+check(not w.director.dark and painted.writes[-1] == green, "unlocked: the look is back")
+auto._on_notification("Spotify")
+check(w.director._flash is None, "a muted program does not flash")
+auto._on_notification("Discord")
+check(
+    w.director._flash is not None and w.director._flash[2] == (0, 0, 255),
+    "a notification flashes in its program's color",
+)
+w.director._flash = None
+w.director._flash_timer.stop()
+w.director.resend()
+import datetime as dt  # noqa: E402
+
+auto._last_tick = dt.datetime.now().replace(hour=21, minute=59, second=0)
+auto.schedule.due  # noqa: B018
+for cmd in auto.schedule.due(auto._last_tick, auto._last_tick.replace(hour=22, minute=0, second=30)):
+    w.director.command(cmd)
+check(w.director.master == 30, "22:00 came: dimmed to 30 %")
+w.director.set_master(100)
+w.settings["automation"] = dict(auto.cfg)
+dlg = app_mod.AutomationsDialog(w)
+cfg_out = dlg.result_config()
+check(
+    cfg_out["schedule"] == [{"at": "22:00", "do": "dim 30"}]
+    and cfg_out["notify"]["apps"] == {"discord": 0x0000FF}
+    and cfg_out["profiles"] == [{"app": "game", "preset": "Two"}]
+    and cfg_out["notify"]["mute"] == ["spotify"],
+    f"Automations dialog round-trips the settings ({str(cfg_out)[:70]})",
+)
+dlg.close()
+w.settings.pop("automation")
+auto.configure({})
+client.wait_idle()
 w.presets.pop("One")
 w.presets.pop("Two")
 w._last_preset = None

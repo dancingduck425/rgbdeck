@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.7.0 — 2026-11-10
+
+**Automations** (File → Automations…), all off until you switch them on:
+
+- **Away**: lights off while the screen is locked or the PC sleeps, the look back afterwards
+  (`org.freedesktop.ScreenSaver` and logind on Linux; a desktop check every 2 s on Windows, untested there).
+- **Schedule**: at a time of day dim, restore brightness, apply a preset, lights off / on.
+- **Notification flash** (Linux): a pulse in a color of your choice, own colors per program, a mute list.
+  Windows offers ordinary programs no way to see notifications, so it is not available there.
+- **Per-app looks**: a preset while a program is in front, the previous look back when it is not. The focused
+  program comes from a small KWin script on KDE Plasma and from the foreground window on Windows (untested);
+  other desktops can't supply it.
+- Presets applied while brightness is turned down or the lights are off now respect that.
+- Verified on this hardware: lock signal → keyboard and Govee strip off and back; a real notification →
+  flash on the strip; KWin focus reporting.
+
 ## 1.6.0 — 2026-11-10
 
 - **Music animations**: *Music: spectrum* (bars from bass to treble; rows on a keyboard, brightness on a strip)

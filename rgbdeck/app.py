@@ -27,6 +27,7 @@ from PySide6.QtCore import (
     QRectF,
     QSize,
     QSocketNotifier,
+    QTime,
     Qt,
     QTimer,
     Signal,
@@ -66,6 +67,10 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QTimeEdit,
+    QTabWidget,
+    QPlainTextEdit,
+    QListWidget,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -120,7 +125,7 @@ def setup_logging(verbose: bool):
 
 from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
 from rgbdeck.hw import govee_lan, wled  # noqa: E402
-from rgbdeck import animations, audio, sensors  # noqa: E402
+from rgbdeck import animations, audio, automation, sensors  # noqa: E402
 from rgbdeck.director import Director  # noqa: E402
 from rgbdeck.effects import (  # noqa: E402
     EffectEngine,
@@ -1939,6 +1944,234 @@ class AnimateDialog(QDialog):
         save_json(SETTINGS_FILE, self.w.settings)
 
 
+class AutomationsDialog(QDialog):
+    """Schedule, lights off while away, notification flashes, per-app looks."""
+
+    DO = [("dim", "Dim to …%"), ("preset", "Apply preset"), ("off", "Lights off"), ("on", "Lights on")]
+
+    def __init__(self, w: "MainWindow"):
+        super().__init__(w)
+        self.w = w
+        self.setWindowTitle("Automations")
+        self.setMinimumWidth(560)
+        cfg = dict(w.settings.get("automation") or {})
+        self.rules: List[dict] = [dict(r) for r in cfg.get("schedule") or [] if automation.parse_rule(r)]
+        self.profiles: List[dict] = [dict(r) for r in cfg.get("profiles") or [] if r.get("app") and r.get("preset")]
+        notify = dict(cfg.get("notify") or {})
+        presets = sorted(w.presets)
+        lay = QVBoxLayout(self)
+        tabs = QTabWidget()
+        lay.addWidget(tabs)
+
+        # --- away + schedule
+        page = QWidget()
+        v = QVBoxLayout(page)
+        self.away = QCheckBox("Lights off while the screen is locked or the PC sleeps")
+        self.away.setChecked(cfg.get("away", False))
+        v.addWidget(self.away)
+        v.addWidget(QLabel("At a time of day"))
+        self.rule_list = QListWidget()
+        self.rule_list.setMaximumHeight(130)
+        v.addWidget(self.rule_list)
+        row = QHBoxLayout()
+        self.at = QTimeEdit(QTime(22, 0))
+        self.at.setDisplayFormat("HH:mm")
+        row.addWidget(self.at)
+        self.do = QComboBox()
+        for key, label in self.DO:
+            self.do.addItem(label, key)
+        row.addWidget(self.do, 1)
+        self.percent = QSpinBox()
+        self.percent.setRange(5, 100)
+        self.percent.setValue(30)
+        self.percent.setSuffix(" %")
+        row.addWidget(self.percent)
+        self.rule_preset = QComboBox()
+        self.rule_preset.addItems(presets)
+        row.addWidget(self.rule_preset, 1)
+        add = QPushButton("Add")
+        add.clicked.connect(self._add_rule)
+        row.addWidget(add)
+        rm = QPushButton("Remove")
+        rm.clicked.connect(lambda: self._remove(self.rule_list, self.rules, self._show_rules))
+        row.addWidget(rm)
+        v.addLayout(row)
+        self.do.currentIndexChanged.connect(self._do_changed)
+        self._do_changed()
+        hint = QLabel(
+            "“Dim to 100 %” brings full brightness back, e.g. in the morning. RGB Deck has to be running (the tray is enough)."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("hint")
+        v.addWidget(hint)
+        tabs.addTab(page, "Schedule && away")
+
+        # --- notifications
+        page = QWidget()
+        v = QVBoxLayout(page)
+        self.notify_on = QCheckBox("Flash the lights when a desktop notification arrives")
+        self.notify_on.setChecked(bool(notify.get("on")))
+        v.addWidget(self.notify_on)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Flash color"))
+        self.notify_color = Swatch(u32_to_qcolor(_rgb_to_app(int(notify.get("color", 0xFFFFFF)))), 28)
+        self.notify_color.clicked.connect(self._pick_notify_color)
+        row.addWidget(self.notify_color)
+        test = QPushButton("Test")
+        test.clicked.connect(lambda: self.w.director.flash(self._swatch_rgb()))
+        row.addWidget(test)
+        row.addStretch(1)
+        v.addLayout(row)
+        v.addWidget(QLabel("Own color per program, one per line (part of its name = color):"))
+        self.notify_apps = QPlainTextEdit(
+            "\n".join(f"{k} = #{int(c) & 0xFFFFFF:06X}" for k, c in (notify.get("apps") or {}).items())
+        )
+        self.notify_apps.setPlaceholderText("discord = #5865F2\nthunderbird = #FF8800")
+        self.notify_apps.setFixedHeight(90)
+        v.addWidget(self.notify_apps)
+        self.notify_mute = QLineEdit(", ".join(notify.get("mute") or []))
+        self.notify_mute.setPlaceholderText("Programs that should not flash, e.g. spotify, kdeconnect")
+        v.addWidget(self.notify_mute)
+        if IS_WINDOWS:
+            note = QLabel(
+                "Windows does not let an ordinary program see other programs' notifications: not available here."
+            )
+            note.setWordWrap(True)
+            note.setObjectName("hint")
+            v.addWidget(note)
+            self.notify_on.setEnabled(False)
+        v.addStretch(1)
+        tabs.addTab(page, "Notifications")
+
+        # --- per-app looks
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.addWidget(
+            QLabel("While this program is in front, show this preset (the previous look returns when you leave it):")
+        )
+        self.profile_list = QListWidget()
+        self.profile_list.setMaximumHeight(130)
+        v.addWidget(self.profile_list)
+        row = QHBoxLayout()
+        self.app_name = QComboBox()
+        self.app_name.setEditable(True)
+        self.app_name.addItems(w.automation.profiles.recent)
+        self.app_name.setToolTip("Part of the program's name. The list holds programs that were in front recently.")
+        row.addWidget(self.app_name, 1)
+        self.profile_preset = QComboBox()
+        self.profile_preset.addItems(presets)
+        row.addWidget(self.profile_preset, 1)
+        add = QPushButton("Add")
+        add.clicked.connect(self._add_profile)
+        row.addWidget(add)
+        rm = QPushButton("Remove")
+        rm.clicked.connect(lambda: self._remove(self.profile_list, self.profiles, self._show_profiles))
+        row.addWidget(rm)
+        v.addLayout(row)
+        text = "Paint a look (for a game: WASD and your binds highlighted), save it as a preset, then pick it here."
+        if not presets:
+            text = "Save a preset first (main window, “Save current look”). " + text
+        if not w.automation.focus_supported:
+            text += " The focused program can only be seen on KDE Plasma and on Windows; on this desktop these rules do nothing."
+        hint = QLabel(text)
+        hint.setWordWrap(True)
+        hint.setObjectName("hint")
+        v.addWidget(hint)
+        tabs.addTab(page, "Per-app looks")
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        self._show_rules()
+        self._show_profiles()
+
+    def _do_changed(self):
+        key = self.do.currentData()
+        self.percent.setVisible(key == "dim")
+        self.rule_preset.setVisible(key == "preset")
+
+    def _show_rules(self):
+        self.rules.sort(key=lambda r: r["at"])
+        self.rule_list.clear()
+        names = dict(self.DO)
+        for r in self.rules:
+            verb, _, arg = r["do"].partition(" ")
+            what = (
+                f"Dim to {arg} %" if verb == "dim" else f"Preset “{arg}”" if verb == "preset" else names.get(verb, verb)
+            )
+            self.rule_list.addItem(f"{r['at']}   {what}")
+
+    def _show_profiles(self):
+        self.profile_list.clear()
+        for r in self.profiles:
+            self.profile_list.addItem(f"{r['app']}   →   {r['preset']}")
+
+    def _add_rule(self):
+        key = self.do.currentData()
+        if key == "preset" and not self.rule_preset.currentText():
+            return
+        arg = (
+            f" {self.percent.value()}"
+            if key == "dim"
+            else f" {self.rule_preset.currentText()}"
+            if key == "preset"
+            else ""
+        )
+        self.rules.append({"at": self.at.time().toString("HH:mm"), "do": key + arg})
+        self._show_rules()
+
+    def _add_profile(self):
+        app, preset = self.app_name.currentText().strip(), self.profile_preset.currentText()
+        if app and preset:
+            self.profiles.append({"app": app, "preset": preset})
+            self._show_profiles()
+
+    @staticmethod
+    def _remove(widget, items: list, refresh):
+        row = widget.currentRow()
+        if 0 <= row < len(items):
+            del items[row]
+            refresh()
+
+    def _swatch_rgb(self):
+        c = self.notify_color.color()
+        return c.red(), c.green(), c.blue()
+
+    def _pick_notify_color(self):
+        c = QColorDialog.getColor(self.notify_color.color(), self, "Flash color")
+        if c.isValid():
+            self.notify_color.setColor(c)
+
+    def result_config(self) -> dict:
+        apps = {}
+        for line in self.notify_apps.toPlainText().splitlines():
+            name, _, color = line.partition("=")
+            color = color.strip().lstrip("#")
+            if name.strip() and len(color) == 6:
+                try:
+                    apps[name.strip()] = int(color, 16)
+                except ValueError:
+                    pass
+        r, g, b = self._swatch_rgb()
+        return {
+            "away": self.away.isChecked(),
+            "schedule": list(self.rules),
+            "notify": {
+                "on": self.notify_on.isChecked(),
+                "color": r << 16 | g << 8 | b,
+                "apps": apps,
+                "mute": [m.strip() for m in self.notify_mute.text().split(",") if m.strip()],
+            },
+            "profiles": list(self.profiles),
+        }
+
+
+def _rgb_to_app(rrggbb: int) -> int:
+    """0xRRGGBB (how colors are written in settings meant for people) -> the app's 0xBBGGRR."""
+    return rgb_to_u32(rrggbb >> 16 & 0xFF, rrggbb >> 8 & 0xFF, rrggbb & 0xFF)
+
+
 class SettingsDialog(QDialog):
     def __init__(self, settings: dict, parent=None):
         super().__init__(parent)
@@ -2070,6 +2303,28 @@ class _DirectorHost:
         return self.w._shown_base(dev)
 
 
+class _AutomationHost:
+    """What automations may do (see automation.py)."""
+
+    def __init__(self, w: "MainWindow"):
+        self.w = w
+
+    def command(self, text: str) -> str:
+        return self.w.director.command(text)
+
+    def snapshot(self) -> dict:
+        return self.w._snapshot()
+
+    def restore(self, look: dict):
+        self.w._apply_snap(look)
+
+    def blackout(self, reason: str, on: bool):
+        self.w.director.blackout(reason, on)
+
+    def flash(self, rgb):
+        self.w.director.flash(rgb)
+
+
 class MainWindow(QMainWindow):
     scanFinished = Signal()
     hotkeyPressed = Signal(str)
@@ -2128,6 +2383,9 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_tray()
         self._start_control_socket()
+        self.automation = automation.create(_AutomationHost(self), self)
+        self.automation.status.connect(lambda text: self.statusBar().showMessage(text, 8000))
+        self.automation.configure(self.settings.get("automation") or {})
         self._hotkeys: Optional[WindowsHotkeys] = None
         self.hotkeyPressed.connect(self.director.command)
         self._apply_hotkey_setting()
@@ -2394,6 +2652,9 @@ class MainWindow(QMainWindow):
         m.addAction(a)
         a = QAction("Network lights…", self)
         a.triggered.connect(self._open_lights)
+        m.addAction(a)
+        a = QAction("Automations…", self)
+        a.triggered.connect(self._open_automations)
         m.addAction(a)
         a = QAction("Settings…", self)
         a.triggered.connect(self._open_settings)
@@ -3216,26 +3477,31 @@ class MainWindow(QMainWindow):
 
     def _apply_preset(self, name):
         if name in self.presets:
-            snap = self.presets[name]
             self._last_preset = name
-            self._stop_app_effect()
-            if self._anim_kind:
-                self._set_animation(None)  # a preset is a fixed look
-            try:
-                apply_snapshot(self.client, snap, self.base_colors, self.dim)
-            except DeviceError as e:
-                self.statusBar().showMessage(f"Lost connection: {e}")
-                return
-            fx = snap.get("app_effect")
-            if fx:
-                d = next((x for x in self.client.devices if x.name == fx.get("device")), None)
-                if d:
-                    self._start_app_effect(d, fx.get("kind", "ripple"), EffectSettings.from_dict(fx))
-            if (snap.get("animation") or {}).get("kind"):
-                self._load_animation(snap["animation"], remember=True)
-            if self.dev:
-                self._select_device(self.dev.index)
-            self.statusBar().showMessage(f"Preset '{name}' applied", 3000)
+            self._apply_snap(self.presets[name], f"Preset '{name}' applied")
+
+    def _apply_snap(self, snap: dict, message: str = ""):
+        """Put a stored look (a preset, or what was showing before a per-app profile took over) on the devices."""
+        self._stop_app_effect()
+        if self._anim_kind:
+            self._set_animation(None)  # a preset is a fixed look
+        try:
+            apply_snapshot(self.client, snap, self.base_colors, self.dim)
+            self.director.refresh()  # master brightness / lights off apply to the new look too
+        except DeviceError as e:
+            self.statusBar().showMessage(f"Lost connection: {e}")
+            return
+        fx = snap.get("app_effect")
+        if fx:
+            d = next((x for x in self.client.devices if x.name == fx.get("device")), None)
+            if d:
+                self._start_app_effect(d, fx.get("kind", "ripple"), EffectSettings.from_dict(fx))
+        if (snap.get("animation") or {}).get("kind"):
+            self._load_animation(snap["animation"], remember=True)
+        if self.dev:
+            self._select_device(self.dev.index)
+        if message:
+            self.statusBar().showMessage(message, 3000)
 
     def _preset_menu(self, name, pos):
         menu = QMenu(self)
@@ -3373,6 +3639,13 @@ class MainWindow(QMainWindow):
         dlg.exec()
         if dlg.changed:
             self.start_scan()
+
+    def _open_automations(self):
+        dlg = AutomationsDialog(self)
+        if dlg.exec() == QDialog.Accepted:
+            self.settings["automation"] = dlg.result_config()
+            save_json(SETTINGS_FILE, self.settings)
+            self.automation.configure(self.settings["automation"])
 
     def _open_settings(self):
         dlg = SettingsDialog(dict(self.settings), self)
@@ -3603,6 +3876,7 @@ class MainWindow(QMainWindow):
                 save_json(SETTINGS_FILE, self.settings)
             return
         self._stop_app_effect()
+        self.automation.shutdown()
         status, self._anim_status = self._anim_status, {}
         self._set_animation(None, remember=False)  # devices go back to their own colors; it resumes next start
         self._anim_status = status

@@ -84,6 +84,12 @@ class Director(QObject):
         self._raw.clear()
         self._parked.clear()
 
+    def refresh(self):
+        """Looks were changed behind send() (a preset was applied): take them from the host again."""
+        self._raw.clear()
+        if self.master < 100 or self._blackout:
+            self.resend()
+
     def resend(self):
         """Master, blackout or flash changed: put every per-LED device's look out again."""
         for dev in list(self.client.devices):
