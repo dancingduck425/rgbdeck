@@ -41,6 +41,7 @@ FROZEN_DRIVER_MODULES = (
     "steelseries",
     "hyperx",
     "govee_lan",
+    "wled",
 )
 
 
@@ -206,6 +207,12 @@ class LocalBackend:
 
     def shutdown(self):
         self.close()
+        for mod in self._net_mods:  # network drivers may hold connections / threads of their own
+            if callable(getattr(mod, "shutdown", None)):
+                try:
+                    mod.shutdown()
+                except Exception:  # noqa: BLE001
+                    log.exception("shutdown failed in %s", mod.__name__)
         with self._cv:
             self._stop = True
             self._cv.notify_all()

@@ -12,6 +12,7 @@ TMP = tempfile.mkdtemp(prefix="rgbdeck-unit-")
 os.environ["XDG_CONFIG_HOME"] = TMP
 os.environ["APPDATA"] = TMP  # Windows config root
 os.environ["HOME"] = TMP
+os.environ["RGBDECK_NO_BLUETOOTH"] = "1"  # tests never touch the radio
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import rgbdeck.backend as backend  # noqa: E402
@@ -163,6 +164,70 @@ check(len(room.writes) == n_writes, "a light that is off is not switched on by t
 w._stop_app_effect()
 client.wait_idle()
 w.base_colors[3] = [blue]
+
+# animations play on every per-LED device at once; a room light that is off stays off; stopping restores colors
+check(hasattr(w, "anim_btn") and len(w.anim_actions) == 7, "Animate menu lists Off + six animations")
+painted_before = list(w.base_colors[1])
+room_writes = len(room.writes)
+w.base_colors[3] = [0]  # the room light is off
+w._set_animation("wave", 80)
+client.wait_idle()
+check(
+    w._anim_timer.isActive() and w.settings["animation"] == {"kind": "wave", "speed": 80},
+    "animation runs and is remembered",
+)
+check(len(set(painted.writes[-1])) == 3, f"wave: the keys show different colors ({painted.writes[-1]})")
+check(fx.device.current_mode.name == "Direct", "a device showing an onboard effect joins the animation")
+check(len(room.writes) == room_writes, "a room light that is off is not switched on by an animation")
+w.base_colors[3] = [blue]
+room.slow_colors = True
+w._anim_pos.clear()
+w._anim_tick()
+client.wait_idle()
+check(len(room.writes) > room_writes and room.writes[-1] != [blue], "a room light that is on takes part")
+frame1 = list(painted.writes[-1])
+time.sleep(0.12)
+w._anim_tick()
+client.wait_idle()
+check(painted.writes[-1] != frame1, "frames move with time")
+w.engine = EffectEngine({0: (0, 0), 1: (1, 0), 2: (2, 0)}, {"A": 0, "B": 1, "C": 2}, lambda: (255, 255, 255))
+w.engine.settings.kind = "glow"
+w.engine_dev, w.engine_kind = kbd, "glow"
+w._anim_tick()
+check(
+    w.engine.background == painted.device.colors or len(w.engine.background) == 3,
+    "typing effect renders over the animation",
+)
+client.wait_idle()
+room_writes = len(room.writes)
+w.engine.key_pressed("A")
+w._fx_tick()
+client.wait_idle()
+check(len(room.writes) == room_writes, "the animation, not the typing pulse, drives the room light meanwhile")
+w._stop_app_effect()
+w._set_animation(None)
+client.wait_idle()
+check(
+    not w._anim_timer.isActive() and painted.writes[-1] == painted_before, "stopping gives every device its colors back"
+)
+check(room.writes[-1] == [blue] and w.settings["animation"]["kind"] is None, "room light restored, choice remembered")
+w._set_animation("cycle")
+w._everything_off()
+check(w._anim_kind is None, "All off stops the animation")
+client.wait_idle()
+# put the looks back the way the close tests below expect them
+client.update_leds(client.devices[0], [orange, orange, orange, 0])
+client.update_leds(client.devices[1], painted_before)
+client.update_mode(client.devices[1], client.devices[1].modes[0])
+m = client.devices[2].modes[2]
+client.update_mode(client.devices[2], m)
+client.update_mode(client.devices[0], client.devices[0].modes[0])
+client.wait_idle()
+w.base_colors = {d.index: list(d.colors) for d in client.devices}
+w.base_colors[3] = [blue]
+uniform.modes.clear()
+painted.modes.clear()
+room.modes.clear()
 
 w._really_quit = True
 w.close()

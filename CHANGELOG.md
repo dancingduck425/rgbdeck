@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4.0 — 2026-11-10
+
+- **Govee lights over Bluetooth.** A light in Bluetooth range that the LAN API does not reach (LAN Control off,
+  Bluetooth-only models) is found and driven over Bluetooth LE by itself; the LAN is used whenever it works.
+  Verified on a real H618F strip: power, brightness, color, single segments, whites, scenes, and reading back
+  what the light shows. The strip takes about ten commands a second and hangs up when flooded, so packets go out
+  one at a time, each waiting for the light's answer; a dropped connection is re-established. This also confirms
+  on hardware the segment and scene packets the LAN driver sends. Uses Qt's Bluetooth module: no new dependency.
+- **Animations** (✨ Animate): rainbow wave, color cycle, breathing, aurora, fire and starlight, rendered by the
+  app and played in step on every device that takes per-LED colors. Typing effects render on top; a room light
+  that is off stays off; a device you put on an onboard effect is left alone; stopping gives every device its own
+  colors back. The choice is remembered and resumes at the next start (the app stays in the tray meanwhile).
+- **WLED controllers** (experimental, built against a simulator): found by mDNS or added by address, per-LED
+  colors over the UDP realtime protocol, on/off, "WLED's own effect", look written into WLED on exit.
+- Lights panel: Bluetooth switch and states, WLED rows, what works is listed first, rows no longer clipped.
+- `--apply` hangs up cleanly on network lights; drivers may define `shutdown()`.
+
 ## 1.3.2 — 2026-11-04
 
 - **Search my network** in the Lights panel (runs by itself when the panel opens and nothing is connected):

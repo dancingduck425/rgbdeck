@@ -65,7 +65,7 @@ jobs:
         run: >
           pyinstaller --noconfirm --clean --onefile --windowed --name RGBDeck
           --icon rgbdeck/data/rgbdeck.ico --add-data "rgbdeck/data;rgbdeck/data"
-          --collect-submodules rgbdeck --hidden-import hid packaging/windows/launcher.py
+          --collect-submodules rgbdeck --hidden-import hid --hidden-import PySide6.QtBluetooth packaging/windows/launcher.py
       - name: Smoke-test the exe
         shell: bash
         run: |

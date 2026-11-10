@@ -7,6 +7,7 @@ import sys
 import time
 import types
 
+os.environ["RGBDECK_NO_BLUETOOTH"] = "1"  # tests never touch the radio
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import rgbdeck.backend as backend  # noqa: E402

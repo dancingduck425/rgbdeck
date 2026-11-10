@@ -19,6 +19,9 @@ Packet formats follow Govee's LAN API guide and the govee-local-api project (Apa
 UDP gives no delivery guarantee and a light can be flooded, so every light has a small sender thread: at most
 one update per MIN_SEND_INTERVAL (newer states replace older unsent ones), and the last state is sent once
 more, in full, shortly after things settle.
+
+A light that cannot be reached this way (LAN Control off, a Bluetooth-only model) is driven over Bluetooth LE
+instead when it is in range: same packets, sent directly (govee_ble.py). The LAN is preferred when both work.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ import base64
 import ipaddress
 import json
 import logging
+import math
 import socket
 import struct
 import sys
@@ -35,6 +39,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from rgbdeck import paths
+from rgbdeck.hw import govee_ble
 from rgbdeck.hw.govee_devices import MODELS, SCENE_SETS, lookup
 from rgbdeck.models import (
     MODE_COLORS_PER_LED,
@@ -74,6 +79,9 @@ SCENE_NAMES = {"snow_flake": "Snowflake", "breathe": "Breathing", "valentines_da
 # Windows asks "allow this app on your network?" as soon as a program listens for UDP, so looking for lights
 # is opt-in there (Settings); elsewhere it is on unless switched off.
 DEFAULT_ENABLED = sys.platform != "win32"
+BLE_PROBE_WAIT = 5.0  # a device scan waits this long for remembered Bluetooth lights to connect
+BLE_RESCAN_INTERVAL = 30.0  # looking again for a remembered Bluetooth light that is missing
+BLE_MIN_SEND_INTERVAL = 0.03  # the transport already waits for every packet's answer
 
 
 # ----------------------------------------------------------------------------- settings
@@ -103,6 +111,9 @@ def _config() -> dict:
                 "known": {str(k): dict(v) for k, v in (data.get("known") or {}).items() if isinstance(v, dict)},
                 # address -> MAC of Govee hardware a network search came across (names the entry in the panel)
                 "seen": {str(k): str(v) for k, v in (data.get("seen") or {}).items() if _valid_ip(str(k))},
+                # lights in Bluetooth range may be driven that way when the LAN API does not reach them
+                "bluetooth": bool(data.get("bluetooth", True)),
+                "ble": {str(k): dict(v) for k, v in (data.get("ble") or {}).items() if isinstance(v, dict)},
             }
         return _cfg
 
@@ -126,27 +137,38 @@ def _valid_ip(text: str) -> bool:
 
 
 def get_settings() -> dict:
-    """For the Settings dialog: {"enabled": bool, "manual": [ip, ...]}."""
+    """For the Settings dialog: {"enabled": bool, "manual": [ip, ...], "bluetooth": bool}."""
     cfg = _config()
-    return {"enabled": cfg["enabled"], "manual": list(cfg["manual"])}
+    return {"enabled": cfg["enabled"], "manual": list(cfg["manual"]), "bluetooth": cfg["bluetooth"]}
 
 
-def set_settings(enabled: bool, manual: List[str]) -> bool:
+def set_settings(enabled: bool, manual: List[str], bluetooth: Optional[bool] = None) -> bool:
     """Store the user's choice; True if something changed (the caller then rescans)."""
     cfg = _config()
     manual = [ip.strip() for ip in manual if _valid_ip(ip)]
     manual = list(dict.fromkeys(manual))
-    if cfg["enabled"] == bool(enabled) and cfg["manual"] == manual:
+    bluetooth = cfg["bluetooth"] if bluetooth is None else bool(bluetooth)
+    if cfg["enabled"] == bool(enabled) and cfg["manual"] == manual and cfg["bluetooth"] == bluetooth:
         return False
-    cfg["enabled"], cfg["manual"] = bool(enabled), manual
+    cfg["enabled"], cfg["manual"], cfg["bluetooth"] = bool(enabled), manual, bluetooth
     _save_config()
     _lan.last_scan = 0.0
+    _ble_missed.clear()
+    if not (cfg["enabled"] and bluetooth):
+        govee_ble.stop()
     return True
+
+
+def shutdown():
+    """Called by the backend when the program ends: hang up Bluetooth connections, stop the threads."""
+    govee_ble.stop()
 
 
 def _reset_for_tests():
     global _cfg
     _lan.stop()
+    govee_ble.stop()
+    _ble_missed.clear()
     with _cfg_lock:
         _cfg = None
 
@@ -209,6 +231,8 @@ def rescan():
     if _config()["enabled"]:
         _lan.start()
         _lan.scan()
+        if _ble_start() and not govee_ble.links():
+            govee_ble.scan()
 
 
 # MAC prefixes registered to Shenzhen Intellirocks Tech (Govee) in the IEEE registry. Older lights carry
@@ -316,6 +340,7 @@ def search_network(networks: Optional[List[ipaddress.IPv4Network]] = None, progr
     lan.start()
     t0 = time.monotonic()
     lan.scan()
+    radio = _ble_start() and govee_ble.scan()  # looks around for five seconds while the addresses are walked
     nets = list(networks) if networks is not None else _local_networks()
     request = {"account_topic": "reserve"}
     locked: List[str] = []
@@ -364,15 +389,37 @@ def search_network(networks: Optional[List[ipaddress.IPv4Network]] = None, progr
     blind = [ip for ip in blind if ip not in answering]
     _save_config()
     lan.last_scan = time.monotonic()
+    bluetooth: List[str] = []
+    if radio:
+        govee_ble.wait(t0 + govee_ble.SCAN_MS / 1000 + 4.0, lambda: not govee_ble.scanning() and not _ble_pending())
+        _ble_missed.clear()
+        bluetooth = sorted(f"Govee {ln.sku}" for ln in govee_ble.links("ready") if not _on_lan(ln.sku, ln.suffix))
     log.info(
-        "network search over %d addresses: answering %s, LAN Control off %s, silent %s", hosts, found, locked, blind
+        "network search over %d addresses: answering %s, LAN Control off %s, silent %s, Bluetooth %s",
+        hosts,
+        found,
+        locked,
+        blind,
+        bluetooth,
     )
-    return {"found": found, "locked": locked, "blind": blind, "hosts": hosts}
+    return {
+        "found": found,
+        "locked": locked,
+        "blind": blind,
+        "hosts": hosts,
+        "bluetooth": bluetooth,
+        "bluetooth_error": govee_ble.scan_error() if radio else "",
+    }
 
 
 def forget(ip: str) -> bool:
-    """Drop an address the user added and any remembered light at it; True if something was removed."""
+    """Drop an address the user added and any remembered light at it (or a remembered Bluetooth light, by
+    its key); True if something was removed."""
     cfg = _config()
+    if ip in cfg["ble"]:
+        del cfg["ble"][ip]
+        _save_config()
+        return True
     gone = [k for k, v in cfg["known"].items() if v.get("ip") == ip]
     if ip not in cfg["manual"] and not gone:
         return False
@@ -411,6 +458,21 @@ def status_report() -> List[dict]:
             name = "Govee device" if ip in cfg["seen"] else "Light added by address"
             rows.append({"name": name, "ip": ip, "state": "blind" if reach == "quiet" else reach})
             listed.add(ip)
+    if cfg["bluetooth"]:
+        live = {ln.key: ln for ln in govee_ble.links() if not _on_lan(ln.sku, ln.suffix)}
+        for key, ln in live.items():
+            state = "bluetooth" if ln.state == "ready" else "bt-connecting"
+            rows.append({"name": f"Govee {ln.sku}", "ip": "Bluetooth", "state": state})
+        for key, v in cfg["ble"].items():
+            if key not in live and not _on_lan(v.get("sku", ""), v.get("suffix", "")):
+                rows.append(
+                    {"name": f"Govee {v.get('sku', 'light')}", "ip": "Bluetooth", "state": "bt-away", "key": key}
+                )
+        if any(r["state"] == "bluetooth" for r in rows):
+            for r in rows:
+                if r["state"] == "refused":
+                    r["state"] = "refused-bt"
+    rows.sort(key=lambda r: 0 if r["state"] in ("connected", "bluetooth") else 1)  # what works comes first
     return rows
 
 
@@ -661,27 +723,165 @@ _lan = _Lan()
 # ----------------------------------------------------------------------------- packets
 def _packet(body: bytes) -> str:
     """One Bluetooth packet for ptReal: 19 bytes, zero padded, plus the XOR checksum, base64."""
-    raw = bytearray(body[:19].ljust(19, b"\x00"))
-    x = 0
-    for b in raw:
-        x ^= b
-    raw.append(x)
-    return base64.b64encode(bytes(raw)).decode()
+    return base64.b64encode(govee_ble.checksum(body)).decode()
 
 
-def segment_packet(rgb: Tuple[int, int, int], segments: List[int]) -> str:
+def segment_bytes(rgb: Tuple[int, int, int], segments: List[int]) -> bytes:
     """Colour for a set of segments (0-based): 33 05 15 01 r g b 00*5 <bitmask, bit n = segment n>."""
     mask = bytearray(7)
     for n in segments:
         if 0 <= n < MAX_SEGMENTS:
             mask[n // 8] |= 1 << (n % 8)
-    return _packet(
+    return govee_ble.checksum(
         bytes([0x33, 0x05, 0x15, 0x01, rgb[0] & 0xFF, rgb[1] & 0xFF, rgb[2] & 0xFF, 0, 0, 0, 0, 0]) + bytes(mask)
     )
 
 
+def scene_bytes(code: int) -> bytes:
+    return govee_ble.checksum(bytes([0x33, 0x05, 0x04, code & 0xFF]))
+
+
+def segment_packet(rgb: Tuple[int, int, int], segments: List[int]) -> str:
+    return base64.b64encode(segment_bytes(rgb, segments)).decode()
+
+
 def scene_packet(code: int) -> str:
-    return _packet(bytes([0x33, 0x05, 0x04, code & 0xFF]))
+    return base64.b64encode(scene_bytes(code)).decode()
+
+
+def kelvin_rgb(kelvin: int) -> Tuple[int, int, int]:
+    """Colour of a black body at this temperature (Tanner Helland's fit), for lights told their white as RGB."""
+    t = max(1000, min(40000, kelvin)) / 100.0
+    if t <= 66:
+        r = 255.0
+        g = 99.4708025861 * math.log(t) - 161.1195681661
+        b = 0.0 if t <= 19 else 138.5177312231 * math.log(t - 10) - 305.0447927307
+    else:
+        r = 329.698727446 * (t - 60) ** -0.1332047592
+        g = 288.1221695283 * (t - 60) ** -0.0755148492
+        b = 255.0
+    return tuple(int(max(0.0, min(255.0, c)) + 0.5) for c in (r, g, b))
+
+
+# ----------------------------------------------------------------------------- links
+class _LanLink:
+    """One light reached through the LAN API."""
+
+    kind = "lan"
+    confirm = True  # UDP: the settled state goes out a second time
+    min_interval = MIN_SEND_INTERVAL
+
+    def __init__(self, lan: "_Lan", light: _Light):
+        self._lan, self._light = lan, light
+        self.where = f"Wi-Fi light at {light.ip}" + (" (no answer yet: sending blind)" if light.blind else "")
+
+    def _send(self, cmd: str, data: dict):
+        self._lan.send(self._light.ip, cmd, data)
+
+    def power(self, on: bool):
+        self._send("turn", {"value": int(on)})
+
+    def brightness(self, percent: int):
+        self._send("brightness", {"value": percent})
+
+    def color(self, rgb: Tuple[int, int, int]):
+        self._send("colorwc", {"color": {"r": rgb[0], "g": rgb[1], "b": rgb[2]}, "colorTemInKelvin": 0})
+
+    def white(self, kelvin: int):
+        self._send("colorwc", {"color": {"r": 0, "g": 0, "b": 0}, "colorTemInKelvin": kelvin})
+
+    def scene(self, code: int):
+        self._send("ptReal", {"command": [scene_packet(code)]})
+
+    def segments(self, groups: List[Tuple[Tuple[int, int, int], List[int]]]):
+        self._send("ptReal", {"command": [segment_packet(rgb, segs) for rgb, segs in groups]})
+
+    def poll(self):
+        self._send("devStatus", {})
+
+    def beliefs(self, since: float) -> Optional[Tuple[bool, int]]:
+        st = self._lan.status.get(self._light.ip)
+        if not st or st[0] <= since + 0.05:
+            return None
+        try:
+            return bool(int(st[1].get("onOff", 0))), int(st[1].get("brightness", 0))
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+
+class _BleLink:
+    """One light reached over Bluetooth: the same packets, written directly, one at a time."""
+
+    kind = "ble"
+    confirm = False  # every packet is answered by the light
+    min_interval = BLE_MIN_SEND_INTERVAL
+
+    def __init__(self, link, model):
+        self._link, self._model = link, model
+        self.where = f"Bluetooth light ({link.name})"
+
+    def _send(self, *packets: bytes):
+        if not self._link.send(list(packets)):
+            log.debug("Bluetooth %s: packets not delivered", self._link.name)
+
+    def power(self, on: bool):
+        self._send(govee_ble.checksum(bytes([0x33, 0x01, int(on)])))
+
+    def brightness(self, percent: int):
+        # segmented lights count in percent, the older single-colour protocol in 1..254
+        value = percent if self._model.segments else max(1, percent * 254 // 100)
+        self._send(govee_ble.checksum(bytes([0x33, 0x04, value])))
+
+    def color(self, rgb: Tuple[int, int, int]):
+        if self._model.segments:
+            self._send(segment_bytes(rgb, list(range(self._model.segments))))
+        else:  # two generations of "one colour" packets; a light ignores the one it does not know
+            self._send(
+                govee_ble.checksum(bytes([0x33, 0x05, 0x0D, *rgb])),
+                govee_ble.checksum(bytes([0x33, 0x05, 0x02, *rgb])),
+            )
+
+    def white(self, kelvin: int):
+        self.color(kelvin_rgb(kelvin))
+
+    def scene(self, code: int):
+        self._send(scene_bytes(code))
+
+    def segments(self, groups: List[Tuple[Tuple[int, int, int], List[int]]]):
+        self._send(*(segment_bytes(rgb, segs) for rgb, segs in groups))
+
+    def poll(self):
+        pass  # the transport asks for power and brightness every couple of seconds by itself
+
+    def beliefs(self, since: float) -> Optional[Tuple[bool, int]]:
+        ln = self._link
+        if ln.status_at <= since + 0.05 or ln.power is None or ln.brightness is None:
+            return None
+        bri = ln.brightness if self._model.segments else ln.brightness * 100 // 254
+        return ln.power, bri
+
+    def read_state(self) -> dict:
+        """What the light shows right now, in devStatus form (plus "segments": colours, when it is showing
+        per-segment colours)."""
+        ln, ask = self._link, self._link.ask
+        power = ask(govee_ble.checksum(b"\xaa\x01"))
+        bri = ask(govee_ble.checksum(b"\xaa\x04"))
+        if power is None or bri is None:
+            return {}
+        st: dict = {"onOff": power[2], "brightness": bri[2] if self._model.segments else bri[2] * 100 // 254}
+        mode = ask(govee_ble.checksum(b"\xaa\x05\x01"))
+        n = self._model.segments
+        if n and mode is not None and mode[2] == 0x15:
+            colors: List[int] = []
+            for group in range(1, (n + 3) // 4 + 1):
+                reply = ln.ask(govee_ble.checksum(bytes([0xAA, 0xA5, group])))
+                if reply is None:
+                    return st
+                for k in range(4):  # brightness, r, g, b per segment
+                    level, r, g, b = reply[3 + 4 * k : 7 + 4 * k]
+                    colors.append(rgb_to_u32(*(c * min(100, level) // 100 for c in (r, g, b))))
+            st["segments"] = colors[:n]
+        return st
 
 
 # ----------------------------------------------------------------------------- driver
@@ -689,8 +889,8 @@ class GoveeLight:
     keeps_state = True  # the light remembers colour, scene and power by itself: nothing to store on close
     follows_typing = True  # the app may pulse it along with a keyboard's typing effect
 
-    def __init__(self, lan: _Lan, light: _Light, status: Optional[dict] = None):
-        self._lan, self._light = lan, light
+    def __init__(self, link, light: _Light, status: Optional[dict] = None):
+        self._link, self._light = link, light
         self.model = lookup(light.sku)
         known = light.sku in MODELS
         # physical segments the light exposes; the user may show fewer LEDs (1 = treat it as one light)
@@ -701,6 +901,8 @@ class GoveeLight:
             self._max = 1 if known else UNKNOWN_MODEL_SEGMENTS
         self._count = self._physical or 1
         self._cv = threading.Condition()
+        self._tx = threading.Lock()  # held while packets for one state go out
+        self._force = False  # next colour update repeats every segment
         self._want: Optional[tuple] = None  # newest state not sent yet
         self._last_want: Optional[tuple] = None
         self._last_tx = 0.0
@@ -710,8 +912,13 @@ class GoveeLight:
         self._bri: Optional[int] = None
         self._sent: Optional[List[int]] = None  # segment colours as last sent (None: unknown / not in colour mode)
         self.device = self._build_device(status)
-        self._thread = threading.Thread(target=self._run, name=f"rgbdeck-govee-{light.ip}", daemon=True)
+        self._thread = threading.Thread(target=self._run, name=f"rgbdeck-govee-{light.ip or light.id}", daemon=True)
         self._thread.start()
+
+    @property
+    def slow_colors(self) -> bool:
+        """Many different colours take about a second to deliver (Bluetooth): animations send one colour."""
+        return self._link.kind == "ble"
 
     # ---- device model ---------------------------------------------------------------
     def _build_device(self, status: Optional[dict]) -> Device:
@@ -746,7 +953,7 @@ class GoveeLight:
             "LED Strip" if self._physical else "Light",
             name,
             "Govee",
-            f"Wi-Fi light at {light.ip}" + (" (no answer yet: sending blind)" if light.blind else ""),
+            self._link.where,
             light.version,
             light.id,
             f"govee:{light.id}",
@@ -789,6 +996,12 @@ class GoveeLight:
             best.brightness = max(1, bri)
             dev.active_mode = best.index
             return
+        segments = st.get("segments")
+        if segments and len(segments) == self._count:
+            dev.colors = [rgb_to_u32(*(int(c * bri / 100 + 0.5) for c in u32_to_rgb(v))) for v in segments]
+            return
+        if "color" not in st:
+            return  # the light did not say which colour it shows
         shown = rgb_to_u32(*(int(c * bri / 100 + 0.5) for c in rgb))
         dev.colors = [shown] * self._count
 
@@ -796,10 +1009,10 @@ class GoveeLight:
         """Show the light as this many LEDs (1 .. its segment count); they are spread over the real segments."""
         if zone_idx != 0:
             raise ValueError(f"zone {zone_idx} does not exist")
-        with self._cv:
+        with self._tx, self._cv:
             self._count = max(1, min(self._max, int(count)))
             self._layout(self.device.colors)
-            self._sent = None
+            self._force = True
 
     def _segments_of(self, led: int) -> List[int]:
         """Real segments behind one shown LED."""
@@ -830,12 +1043,14 @@ class GoveeLight:
             if self._closed:
                 return
             self._closed = True
+            self._cv.notify_all()
+        self._thread.join(timeout=3.0)
+        with self._cv:
             final = self._want or (self._last_want if self._confirm_at is not None else None)
             self._want = None
-            if final is not None:
+        if final is not None:
+            with self._tx:
                 self._transmit(final, full=True)
-            self._cv.notify_all()
-        self._thread.join(timeout=1.0)
 
     # ---- sender ---------------------------------------------------------------------
     def _request(self, want: tuple, fresh: bool = False):
@@ -843,81 +1058,91 @@ class GoveeLight:
             if self._closed:
                 return
             if fresh:
-                self._sent = None
+                self._force = True
             self._want = want
             self._cv.notify_all()
 
-    def _run(self):
+    def _next_job(self) -> Optional[Tuple[tuple, bool]]:
+        """Block until there is something to send: (state, full). None when the driver was closed."""
         with self._cv:
             while not self._closed:
                 now = time.monotonic()
                 if self._want is not None:
-                    due = self._last_tx + MIN_SEND_INTERVAL
+                    due = self._last_tx + self._link.min_interval
                     if now < due:
                         self._cv.wait(due - now)
                         continue
                     want, self._want = self._want, None
-                    self._transmit(want, full=False)
-                    self._last_want = want
-                    self._last_tx = time.monotonic()
-                    self._confirm_at = self._last_tx + CONFIRM_DELAY
-                    continue
+                    if self._force:
+                        self._force, self._sent = False, None
+                    return want, False
                 if self._confirm_at is not None:
                     if now < self._confirm_at:
                         self._cv.wait(self._confirm_at - now)
                         continue
                     self._confirm_at = None
                     if self._last_want is not None:
-                        self._transmit(self._last_want, full=True)  # in case a datagram was lost
-                    self._lan.send(self._light.ip, "devStatus", {})
+                        return self._last_want, True  # in case a datagram was lost
                     continue
                 self._cv.wait()
+        return None
+
+    def _run(self):
+        while True:
+            job = self._next_job()
+            if job is None:
+                return
+            want, full = job
+            with self._tx:  # not under _cv: over Bluetooth a many-coloured state takes a second to deliver
+                self._transmit(want, full)
+                if full:
+                    self._link.poll()
+            with self._cv:
+                self._last_tx = time.monotonic()
+                if not full:
+                    self._last_want = want
+                    self._confirm_at = self._last_tx + CONFIRM_DELAY if self._link.confirm else None
 
     def _refresh_beliefs(self):
-        """A devStatus that arrived after our last command says what the light really does (the Govee app
-        or a wall switch may have changed it)."""
-        st = self._lan.status.get(self._light.ip)
-        if not st or st[0] <= self._last_tx + 0.05:
-            return
-        try:
-            self._on = bool(int(st[1].get("onOff", 0)))
-            self._bri = int(st[1].get("brightness", 0))
-        except (TypeError, ValueError, AttributeError):
-            pass
+        """A status that arrived after our last command says what the light really does (the Govee app or a
+        wall switch may have changed it)."""
+        seen = self._link.beliefs(self._last_tx)
+        if seen is not None:
+            self._on, self._bri = seen
 
     def _transmit(self, want: tuple, full: bool):
         """Turn a wanted state into datagrams. full=True repeats everything; otherwise only what changed."""
         self._refresh_beliefs()
-        ip, send = self._light.ip, self._lan.send
+        link = self._link
         kind = want[0]
 
         def power(on: bool):
             if full or self._on is not on:
-                send(ip, "turn", {"value": int(on)})
+                link.power(on)
             self._on = on
 
         def brightness(value: int):
             if self.model.brightness and (full or self._bri != value):
-                send(ip, "brightness", {"value": value})
+                link.brightness(value)
             self._bri = value
 
         if kind == "off":
             power(False)
         elif kind == "white":
             power(True)
-            send(ip, "colorwc", {"color": {"r": 0, "g": 0, "b": 0}, "colorTemInKelvin": want[1]})
+            link.white(want[1])
             brightness(want[2])
             self._sent = None
         elif kind == "scene":
             power(True)
-            send(ip, "ptReal", {"command": [scene_packet(want[1])]})
+            link.scene(want[1])
             brightness(want[2])
             self._sent = None
         else:
             self._transmit_colors(want[1], full, power, brightness)
 
     def _transmit_colors(self, colors: List[int], full: bool, power, brightness):
-        ip, send = self._light.ip, self._lan.send
+        link = self._link
         if not any(colors):  # all black is "off" for a room light
             power(False)
             return
@@ -927,8 +1152,7 @@ class GoveeLight:
             return
         brightness(100)  # colours are absolute: the app does its own dimming
         if len(set(colors)) == 1:
-            r, g, b = u32_to_rgb(colors[0])
-            send(ip, "colorwc", {"color": {"r": r, "g": g, "b": b}, "colorTemInKelvin": 0})
+            link.color(u32_to_rgb(colors[0]))
             self._sent = list(colors)
             return
         prev = None if full else self._sent
@@ -940,30 +1164,114 @@ class GoveeLight:
         for i in changed:
             by_color.setdefault(colors[i], []).extend(self._segments_of(i))
         if by_color:
-            packets = [segment_packet(u32_to_rgb(c), segs) for c, segs in by_color.items()]
-            send(ip, "ptReal", {"command": packets})
+            link.segments([(u32_to_rgb(c), segs) for c, segs in by_color.items()])
         self._sent = list(colors)
 
 
 # ----------------------------------------------------------------------------- module API
+_ble_missed: set = set()  # remembered Bluetooth lights that did not turn up: later scans do not wait for them
+_ble_probed: frozenset = frozenset()
+
+
+def _on_lan(sku: str, suffix: str) -> bool:
+    """Is this Bluetooth light (model + last two bytes of its id) already answering over the LAN API?"""
+    if not suffix:
+        return False
+    for r in _lan.present():
+        if not r.blind and r.sku.upper() == sku.upper() and r.id.replace(":", "").upper().endswith(suffix.upper()):
+            return True
+    return False
+
+
+def _ble_wanted(advert) -> bool:
+    cfg = _config()
+    return cfg["enabled"] and cfg["bluetooth"] and not _on_lan(advert.sku, advert.suffix)
+
+
+def _ble_start() -> bool:
+    cfg = _config()
+    return bool(cfg["enabled"] and cfg["bluetooth"] and govee_ble.start(_ble_wanted))
+
+
+def _ble_pending() -> bool:
+    return bool(govee_ble.links("connecting"))
+
+
+def _ble_keys() -> frozenset:
+    """Bluetooth lights with a working connection that the LAN does not already serve."""
+    return frozenset(f"ble:{ln.key}" for ln in govee_ble.links("ready") if not _on_lan(ln.sku, ln.suffix))
+
+
 def fingerprint() -> frozenset:
     """Lights present right now (the backend rescans when this differs from probed())."""
-    if not _config()["enabled"]:
+    cfg = _config()
+    if not cfg["enabled"]:
         return frozenset()
     _lan.start()
     if time.monotonic() - _lan.last_scan >= RESCAN_INTERVAL:
         _lan.scan()
-    return frozenset(r.id for r in _lan.present())
+    present = frozenset(r.id for r in _lan.present())
+    if _ble_start():
+        ready = {ln.key for ln in govee_ble.links()}
+        missing = [
+            k for k, v in cfg["ble"].items() if k not in ready and not _on_lan(v.get("sku", ""), v.get("suffix", ""))
+        ]
+        if missing and govee_ble.scan_age() >= BLE_RESCAN_INTERVAL:
+            govee_ble.scan()
+        present |= _ble_keys()
+    return present
 
 
 def probed() -> frozenset:
     """The lights the last probe() handed out."""
-    return _lan.probed
+    return _lan.probed | _ble_probed
+
+
+def _probe_ble() -> List["GoveeLight"]:
+    global _ble_probed
+    _ble_probed = frozenset()
+    cfg = _config()
+    if not _ble_start():
+        return []
+    remembered = {k: v for k, v in cfg["ble"].items() if not _on_lan(v.get("sku", ""), v.get("suffix", ""))}
+    up = {ln.key for ln in govee_ble.links("ready")}
+    if govee_ble.scan_age() >= BLE_RESCAN_INTERVAL and not set(remembered) <= up:
+        govee_ble.scan()
+    elif not cfg["ble"] and govee_ble.scan_age() >= 300.0:
+        govee_ble.scan()  # nothing remembered: look around now and then; what turns up triggers a rescan
+    expected = set(remembered) - _ble_missed
+    if expected - up:
+        govee_ble.wait(
+            time.monotonic() + BLE_PROBE_WAIT, lambda: expected <= {ln.key for ln in govee_ble.links("ready")}
+        )
+        _ble_missed.update(expected - {ln.key for ln in govee_ble.links("ready")})
+    found, keys, changed = [], set(), False
+    for ln in govee_ble.links():
+        if _on_lan(ln.sku, ln.suffix):
+            govee_ble.drop(ln.key)  # the LAN serves it: leave Bluetooth free for the phone
+            continue
+        if ln.state != "ready":
+            continue
+        _ble_missed.discard(ln.key)
+        light = _Light(ln.key, "", ln.sku)
+        link = _BleLink(ln, lookup(ln.sku))
+        found.append(GoveeLight(link, light, link.read_state()))
+        keys.add(f"ble:{ln.key}")
+        entry = {"name": ln.name, "sku": ln.sku, "suffix": ln.suffix}
+        if cfg["ble"].get(ln.key) != entry:
+            cfg["ble"][ln.key] = entry
+            changed = True
+    if changed:
+        _save_config()
+    _ble_probed = frozenset(keys)
+    return found
 
 
 def probe() -> List[GoveeLight]:
+    global _ble_probed
     lan = _lan
     lan.probed = frozenset()
+    _ble_probed = frozenset()
     cfg = _config()
     if not cfg["enabled"]:
         return []
@@ -994,8 +1302,12 @@ def probe() -> List[GoveeLight]:
     found = []
     for r in lights:
         st = lan.status.get(r.ip)
-        found.append(GoveeLight(lan, r, st[1] if st else None))
+        found.append(GoveeLight(_LanLink(lan, r), r, st[1] if st else None))
     lan.probed = frozenset(r.id for r in lights)
+    try:
+        found += _probe_ble()
+    except Exception:  # noqa: BLE001 - Bluetooth trouble must not cost the Wi-Fi lights
+        log.exception("Bluetooth probe failed")
     return found
 
 
@@ -1015,4 +1327,5 @@ __all__ = [
     "scene_packet",
     "segment_packet",
     "set_settings",
+    "shutdown",
 ]

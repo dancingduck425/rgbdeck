@@ -5,15 +5,17 @@
 ![License GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-green)
 
 Standalone RGB lighting control for Linux and Windows. Talks to your devices **directly** with its own drivers —
-USB peripherals over HID, Govee room lights over your local network — no vendor software, no cloud account, no
+USB peripherals over HID, Govee and WLED room lights over your local network or Bluetooth — no vendor software, no cloud account, no
 background daemon, no third-party RGB software.
 
 - **Per-key painting** on a drawn keyboard, selection tools, gradients, rainbow, dim.
 - **Effects** chips (device onboard effects with speed / brightness / direction / colors).
 - **Typing effects**: ripple & key glow rendered on top of your colors.
 - **Sync all devices**: one click colors keyboard + mouse + motherboard + room lights.
-- **Govee lights** on your Wi-Fi: color, per-segment painting, whites, built-in scenes, and a pulse on every
-  key press while a typing effect runs.
+- **Animations on everything at once**: rainbow wave, color cycle, breathing, aurora, fire, starlight, played in
+  step across keyboard, mainboard and room lights (**✨ Animate**). Typing effects render on top of them.
+- **Govee lights** over Wi-Fi or Bluetooth: color, per-segment painting, whites, built-in scenes, and a pulse on
+  every key press while a typing effect runs. **WLED** strips are found on the network by themselves.
 - **Presets**, apply-at-login, tray icon, single instance.
 - **Close it and the colors stay**: on exit the look is stored in each device's own memory (single color or
   onboard effect), and multi-color key layouts are re-applied at login. The app doesn't need to keep running
@@ -37,7 +39,9 @@ on physical devices** — they are marked *experimental*. If you own one, please
 | Corsair peripherals | K55/K65/K68/K70/K95/Strafe, M65/Scimitar/Glaive/Harpoon/Ironclaw/Nightsword/Dark Core, MM800, ST100, and the newer iCUE "V2" keyboards/mice/mousemats | experimental |
 | Corsair Lighting Node / Commander | Lighting Node PRO & CORE, Commander PRO LED channels, LS100, LT100, 1000D, SPEC OMEGA (set your LED count per channel in the app) | experimental |
 | SteelSeries | Rival 100–710, Rival 3/5, Sensei, Aerox 3/5/9, Apex 3/5/7/9/Pro/TKL/M750, Arctis 5/Nova 3, Siberia 350, QcK Prism | experimental |
-| Govee Wi-Fi lights (LAN API) | Any model with the "LAN Control" switch in the Govee Home app: on/off, brightness, color, whites. 272 models have their segment counts and firmware scenes built in (H618x/H619x strips, Glide, TV backlights, bulbs, lamps…). Bluetooth-only models are not supported | experimental |
+| Govee Wi-Fi lights (LAN API) | Any model with the "LAN Control" switch in the Govee Home app: on/off, brightness, color, whites. 272 models have their segment counts and firmware scenes built in (H618x/H619x strips, Glide, TV backlights, bulbs, lamps…). | experimental |
+| Govee lights over Bluetooth | Used by itself when a light is in range and not reachable over the LAN API (LAN Control off, Bluetooth-only models). Segmented RGBIC lights use the same packets as over the LAN; confirmed on an H618F strip. Other models: on/off, brightness, color | H618F ✅ verified, others experimental |
+| WLED controllers | Any ESP8266 / ESP32 running WLED: found by mDNS or added by address, per-LED colors over the UDP realtime protocol, on/off, hands back to WLED's own effect | experimental |
 | HyperX | Alloy Origins/60/65/Core/Elite/Elite 2/FPS, Pulsefire Surge/Core/FPS Pro/Dart/Raid/Haste, Fury Ultra & Pulsefire mats, QuadCast S/2 S, DuoCast | experimental |
 
 Not supported on purpose: RAM and GPU lighting (driven over I²C/SMBus, where a bad write can brick a module — not
@@ -46,13 +50,18 @@ open a device-support issue with your `lsusb` line.
 
 ### Govee lights
 
+0. **Nothing to set up if the light is within Bluetooth range of the PC**: RGB Deck finds it and drives it over
+   Bluetooth. That works for every state the light can show, but a look with many different segment colors takes
+   about a second to arrive (the light accepts roughly ten Bluetooth commands a second), so animations send one
+   color at a time to such a light. A light holds a single Bluetooth connection: while RGB Deck has it, the
+   Govee app on a phone reaches the light over Wi-Fi. For fast per-segment updates, do step 1.
 1. In the **Govee Home** app open the light, tap the settings gear and switch on **LAN Control**. (Not every
-   model has it; Bluetooth-only lights don't.)
+   model has it.) The LAN is preferred whenever it works.
 2. Keep the light on the same network as the PC. RGB Deck finds it within half a minute and remembers it.
    The **💡 Lights** button next to the device cards lists every light with its state and says what is wrong
    when one is not connected ("on your network, but LAN Control is off", "not reachable", …).
 3. If it doesn't show up: a firewall is probably dropping the light's answers. Allow incoming UDP port 4002
-   from your LAN (`sudo ufw allow proto udp from 192.168.0.0/16 to any port 4002`), or press **Search my network**
+   from your LAN (`sudo ufw allow proto udp from 192.168.0.0/16 to any port 4002`), or press **Search for lights**
    in the Lights panel. It asks every address on your LAN directly (no multicast needed), recognises Govee
    hardware by its network card even when LAN Control is still off, and tells you which of the two it is.
    You can also type an address there yourself.
@@ -62,8 +71,16 @@ Windows then asks once whether RGB Deck may use your network.
 
 The light shows up as one more device: paint its segments like keys (or set the LED count to 1 to treat it as a
 single lamp), pick a white or one of its own scenes from the effect chips, and it follows *Sync all devices*.
-Everything is sent locally over UDP; nothing goes to Govee's cloud. The light keeps whatever you set after the
-app is closed.
+Everything is sent locally (UDP or Bluetooth); nothing goes to Govee's cloud. The light keeps whatever you set
+after the app is closed.
+
+### WLED strips
+
+A controller running [WLED](https://kno.wled.ge) on your network shows up by itself (mDNS); if it doesn't, type
+its address into the Lights panel. A long strip is offered as 30 paintable LEDs spread over the real ones — raise
+**LED count** up to the real number if you want every LED. Colors are streamed with WLED's realtime protocol, so
+the strip goes back to its own effect a few seconds after RGB Deck stops sending (pick "WLED's own effect" to do
+that on purpose); on exit the current look is written into WLED so it stays.
 
 ## Install
 
@@ -120,6 +137,7 @@ the same keyboard confuse each other.
 | Device not listed | Only families in the table above are detected. Close any other program that talks to the device (vendor software, OpenRGB…) — two controllers confuse the hardware. Then **File → Rescan devices**. |
 | Glorious mouse ignores colors | Its lighting is stored per onboard profile (1–3) and most tools only write profile 1. RGB Deck writes all three; if it still ignores you, press the profile button once. While on its cable the mouse still shows your colors — a solid color after charging is just the profile it is on. |
 | Govee light not found | Switch on **LAN Control** for it in the Govee Home app, same network as the PC, and let incoming UDP 4002 through the firewall — or add its address in **Settings → Network lights**. Another program on this PC that listens on that port (Govee Desktop, Home Assistant) also takes the answers away. |
+| Govee light keeps dropping off over Bluetooth | It is at the edge of Bluetooth range, or the Govee app on a nearby phone grabbed the connection. Switch on LAN Control for it, or untick **Use Bluetooth…** in the Lights panel. |
 | Govee segments show wrong / nothing | Set **LED count** to 1 to drive it as one light, and please open an issue with the model number. |
 | Typing effects don't react | They read `/dev/input/event*`. logind grants that to the active session; otherwise add your user to the `input` group. The hint under the effect chips says which input devices are being listened to. |
 | Keyboard flickers / lags while dragging the wheel | Frames are capped per device (Logitech ≈ 20 fps). If another program is also writing to the keyboard, close it. |

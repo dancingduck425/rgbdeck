@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["RGBDECK_NO_BLUETOOTH"] = "1"  # tests never touch the radio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402

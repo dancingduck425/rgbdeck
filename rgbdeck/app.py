@@ -16,10 +16,12 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from PySide6.QtCore import (
+    QCoreApplication,
     QPointF,
     QRect,
     QRectF,
@@ -32,6 +34,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QBrush,
     QColor,
     QConicalGradient,
@@ -114,7 +117,8 @@ def setup_logging(verbose: bool):
 
 
 from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
-from rgbdeck.hw import govee_lan  # noqa: E402
+from rgbdeck.hw import govee_lan, wled  # noqa: E402
+from rgbdeck import animations  # noqa: E402
 from rgbdeck.effects import EffectEngine, EffectSettings, KeyListener, find_keyboard_events  # noqa: E402
 
 APP_NAME = "RGB Deck"
@@ -1497,6 +1501,17 @@ LIGHT_STATES = {
     "unreachable": ("#ff5d6c", "Not reachable. Is it powered and on this network?"),
     "blind": ("#8ab4ff", "No answer comes back, colors are sent anyway (a firewall may be dropping its replies)."),
     "silent": ("#ffb020", "Known light, not answering right now."),
+    "bluetooth": ("#3ddc84", "Connected over Bluetooth."),
+    "bt-connecting": ("#8ab4ff", "In Bluetooth range, connecting…"),
+    "bt-away": (
+        "#ffb020",
+        "Not in Bluetooth range right now (or switched off, or the Govee app on a phone nearby is holding its "
+        "Bluetooth connection). It reconnects by itself.",
+    ),
+    "refused-bt": (
+        "#7d8398",
+        "On your Wi-Fi with LAN Control off. Fine if this is the light connected over Bluetooth.",
+    ),
     "checking": ("#7d8398", "Checking…"),
 }
 
@@ -1510,31 +1525,39 @@ class LightsDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Lights on your network")
+        self.setWindowTitle("Lights")
         self.setMinimumWidth(600)
         self.changed = False  # the caller rescans devices when something was added / removed / switched
         self._shown = None
         lay = QVBoxLayout(self)
         lay.setSpacing(10)
-        head = QLabel("💡  Govee lights")
+        head = QLabel("💡  Room lights")
         head.setObjectName("devTitle")
         lay.addWidget(head)
         intro = QLabel(
-            "RGB Deck drives Govee Wi-Fi lights directly over your network. No account, no cloud. "
-            "A connected light shows up as a device next to your keyboard and mouse."
+            "RGB Deck drives Govee lights (over your network or Bluetooth) and WLED strips directly. No account, "
+            "no cloud. A connected light shows up as a device next to your keyboard and mouse."
         )
         intro.setWordWrap(True)
         intro.setObjectName("hint")
         lay.addWidget(intro)
-        self.enable = QCheckBox("Look for Govee lights on my network")
+        self.enable = QCheckBox("Look for Govee lights")
         self.enable.setChecked(govee_lan.get_settings()["enabled"])
         self.enable.setToolTip(
             "Windows asks once whether RGB Deck may use your network: allow it for private networks."
         )
         self.enable.toggled.connect(self._toggle)
         lay.addWidget(self.enable)
+        self.bluetooth = QCheckBox("Use Bluetooth for lights that can't be reached over the network")
+        self.bluetooth.setChecked(govee_lan.get_settings()["bluetooth"])
+        self.bluetooth.setToolTip(
+            "A light takes one Bluetooth connection at a time: while RGB Deck holds it, the Govee app on a phone\n"
+            "reaches the light over Wi-Fi instead. Per-segment colors update more slowly than over the network."
+        )
+        self.bluetooth.toggled.connect(self._toggle)
+        lay.addWidget(self.bluetooth)
 
-        self.search_btn = QPushButton("Search my network")
+        self.search_btn = QPushButton("Search for lights")
         self.search_btn.setObjectName("primary")
         self.search_btn.setToolTip(
             "Asks every address on your local network whether it is a Govee light, and looks for Govee\n"
@@ -1567,10 +1590,8 @@ class LightsDialog(QDialog):
             "<b>Connecting a Govee light</b><br>"
             "1. Open the <b>Govee Home</b> app on your phone and tap the light.<br>"
             "2. Tap the settings gear (top right) and switch on <b>LAN Control</b>.<br>"
-            "3. Keep the light on the same network as this PC. It appears here within half a minute.<br><br>"
-            "Not every model has the switch: Bluetooth-only Govee lights can't be reached this way. "
-            "If a light with LAN Control on is still not found, type its address above. "
-            "A firewall on this PC has to let incoming UDP port 4002 through for lights to be found by themselves."
+            "3. Keep the light on the same network as this PC. It appears here within half a minute.<br>"
+            "Without that switch, a light within Bluetooth range of this PC is driven over Bluetooth instead."
         )
         steps.setWordWrap(True)
         steps.setObjectName("hint")
@@ -1587,12 +1608,12 @@ class LightsDialog(QDialog):
         self._timer.start(1000)
         govee_lan.rescan()
         self._refresh()
-        if self.enable.isChecked() and not any(r["state"] == "connected" for r in self._shown or []):
+        if self.enable.isChecked() and not any(r["state"] in ("connected", "bluetooth") for r in self._shown or []):
             QTimer.singleShot(200, self._search)  # nothing connected: go and look without being asked
 
     # ---- list -------------------------------------------------------------------
     def _refresh(self):
-        rows = govee_lan.status_report() if self.enable.isChecked() else []
+        rows = (govee_lan.status_report() if self.enable.isChecked() else []) + wled.status_report()
         if rows == self._shown:
             return
         self._shown = rows
@@ -1602,12 +1623,13 @@ class LightsDialog(QDialog):
                 item.widget().deleteLater()
         if not rows:
             empty = QLabel(
-                "No light found yet. Press “Search my network”, or follow the steps below first."
+                "No light found yet. Press “Search for lights”, or follow the steps below first."
                 if self.enable.isChecked()
                 else "Not looking for lights. Switch it on above."
             )
             empty.setWordWrap(True)
             self.rows.addWidget(empty)
+            QTimer.singleShot(0, self.adjustSize)
             return
         for r in rows:
             color, text = LIGHT_STATES.get(r["state"], LIGHT_STATES["checking"])
@@ -1619,15 +1641,18 @@ class LightsDialog(QDialog):
                 f"<span style='color:#7d8398'>· {r['ip']}</span><br>{text}"
             )
             lbl.setWordWrap(True)
+            lbl.setMinimumHeight(lbl.heightForWidth(390))  # nested layouts do not pass height-for-width on
             h.addWidget(lbl, 1)
-            if r["state"] != "connected":
+            if r["state"] not in ("connected", "bluetooth", "bt-connecting"):
                 rm = QPushButton("Remove")
-                rm.clicked.connect(lambda _c=False, ip=r["ip"]: self._remove(ip))
+                rm.clicked.connect(lambda _c=False, ip=r.get("key") or r["ip"]: self._remove(ip))
                 h.addWidget(rm, 0, Qt.AlignTop)
             self.rows.addWidget(w)
+        QTimer.singleShot(0, self.adjustSize)  # word-wrapped rows change the height the dialog needs
 
-    def _toggle(self, on: bool):
-        govee_lan.set_settings(on, govee_lan.get_settings()["manual"])
+    def _toggle(self, _on: bool = False):
+        self.bluetooth.setEnabled(self.enable.isChecked())
+        govee_lan.set_settings(self.enable.isChecked(), govee_lan.get_settings()["manual"], self.bluetooth.isChecked())
         self.changed = True
         govee_lan.rescan()
         self._refresh()
@@ -1651,6 +1676,7 @@ class LightsDialog(QDialog):
         def work():
             try:
                 res = govee_lan.search_network(progress=tick)
+                res["wled"] = wled.search()
             except Exception as e:  # noqa: BLE001 - report it in the panel instead of dying silently
                 log.exception("network search failed")
                 res = {"error": str(e)}
@@ -1663,7 +1689,7 @@ class LightsDialog(QDialog):
 
     def _searched(self, res: dict):
         self.search_btn.setEnabled(True)
-        self.search_btn.setText("Search my network")
+        self.search_btn.setText("Search for lights")
         self.enable.blockSignals(True)
         self.enable.setChecked(govee_lan.get_settings()["enabled"])
         self.enable.blockSignals(False)
@@ -1685,16 +1711,24 @@ class LightsDialog(QDialog):
                 f"Govee hardware at {', '.join(res['blind'])} takes commands but its answers do not arrive "
                 "(allow incoming UDP port 4002 in this PC's firewall). Colors are sent to it anyway."
             )
-        if not parts:
+        if res.get("wled"):
+            parts.append(f"Found {', '.join(res['wled'])}.")
+        if res.get("bluetooth"):
             parts.append(
-                f"No Govee device among the {res['hosts']} addresses of your network. Is the light powered and on "
-                "the same Wi-Fi as this PC? Bluetooth-only Govee lights can't be found this way."
+                f"Connected to {', '.join(res['bluetooth'])} over <b>Bluetooth</b>. It shows up as a device in a moment."
+            )
+        if not parts:
+            bt = res.get("bluetooth_error")
+            parts.append(
+                f"No Govee or WLED device among the {res['hosts']} addresses of your network"
+                + (f", and Bluetooth could not look ({bt})." if bt else " or in Bluetooth range.")
+                + " Is the light powered, and either on the same Wi-Fi as this PC or within a few meters of it?"
             )
         self.result.setText(" ".join(parts))
         self._refresh()
 
     def _remove(self, ip: str):
-        if govee_lan.forget(ip):
+        if govee_lan.forget(ip) | wled.forget(ip):
             self.changed = True
         self._refresh()
 
@@ -1708,6 +1742,10 @@ class LightsDialog(QDialog):
 
         def work():
             verdict, sku = govee_lan.diagnose(ip)
+            if verdict not in ("found", "invalid", "unreachable"):
+                name = wled.add(ip)  # not a Govee light answering: perhaps a WLED controller
+                if name:
+                    verdict, sku = "wled", name
             self.checked.emit(ip, verdict, sku)
 
         threading.Thread(target=work, name="rgbdeck-govee-check", daemon=True).start()
@@ -1721,6 +1759,12 @@ class LightsDialog(QDialog):
             return
         if verdict == "unreachable":
             self.result.setText(f"Nothing reachable at {ip}. Check the address and that the light is powered.")
+            return
+        if verdict == "wled":
+            self.result.setText(f"Found the WLED controller “{sku}” at {ip}. It appears as a device in a moment.")
+            self.changed = True
+            self.addr.clear()
+            self._refresh()
             return
         cfg = govee_lan.get_settings()
         if verdict == "found":
@@ -1861,6 +1905,14 @@ class MainWindow(QMainWindow):
         self.listener: Optional[KeyListener] = None
         self._fx_timer = QTimer(self)
         self._fx_timer.timeout.connect(self._fx_tick)
+        self._anim_kind: Optional[str] = None  # animation playing on all devices (animations.KINDS)
+        self._anim_speed = 50
+        self._anim_t0 = time.monotonic()
+        self._anim_pos: Dict[int, tuple] = {}  # device index -> normalised LED positions
+        self._anim_touched: Set[int] = set()
+        self._anim_resume = True  # start the remembered animation after the first scan
+        self._anim_timer = QTimer(self)
+        self._anim_timer.timeout.connect(self._anim_tick)
         self._fx_last_frame: Optional[List[int]] = None
         self._build_ui()
         self._build_tray()
@@ -1890,10 +1942,36 @@ class MainWindow(QMainWindow):
         top.addLayout(self.tabs_lay)
         self.lights_btn = QPushButton("💡  Lights")
         self.lights_btn.setToolTip(
-            "Govee lights on your network: what is connected, how to connect one, add by address"
+            "Govee lights and WLED strips: what is connected, how to connect one, add by address"
         )
         self.lights_btn.clicked.connect(self._open_lights)
         top.addWidget(self.lights_btn)
+        self.anim_btn = QPushButton("✨  Animate")
+        self.anim_btn.setToolTip("Animations that play on all your devices at once, in step with each other")
+        self.anim_menu = QMenu(self.anim_btn)
+        self.anim_actions: Dict[Optional[str], QAction] = {}
+        kinds = QActionGroup(self)
+        for kind, label, tip in [(None, "Off", "Back to your own colors")] + animations.KINDS:
+            a = self.anim_menu.addAction(label)
+            a.setCheckable(True)
+            a.setToolTip(tip)
+            a.triggered.connect(lambda _c=False, k=kind: self._set_animation(k))
+            kinds.addAction(a)
+            self.anim_actions[kind] = a
+            if kind is None:
+                self.anim_menu.addSeparator()
+        self.anim_menu.addSeparator()
+        self.anim_speeds: Dict[int, QAction] = {}
+        speeds = QActionGroup(self)
+        for label, value in (("Slow", 20), ("Normal", 50), ("Fast", 80)):
+            a = self.anim_menu.addAction(label)
+            a.setCheckable(True)
+            a.triggered.connect(lambda _c=False, v=value: self._set_animation(self._anim_kind, v))
+            speeds.addAction(a)
+            self.anim_speeds[value] = a
+        self.anim_menu.setToolTipsVisible(True)
+        self.anim_btn.setMenu(self.anim_menu)
+        top.addWidget(self.anim_btn)
         top.addStretch(1)
         self.sync_chk = QCheckBox("Sync all devices")
         self.sync_chk.setToolTip("When on, colors you apply go to every device (keyboard, mouse, …) at once")
@@ -2530,6 +2608,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"'{src.name}' applied to every device that has it", 3000)
 
     def _everything_off(self):
+        if self._anim_kind:
+            self._set_animation(None)
         for d in self.client.devices:
             off = d.mode_named("Off")
             if off:
@@ -2638,6 +2718,101 @@ class MainWindow(QMainWindow):
         if self.engine_dev is self.dev:
             self.canvas.set_colors(frame)
 
+    # ------------------------------------------------------- animations
+    def _set_animation(self, kind: Optional[str], speed: Optional[int] = None, remember: bool = True):
+        """Play an animation on every device that takes per-LED colors (None: stop, back to their own colors)."""
+        if speed is not None:
+            self._anim_speed = max(1, min(100, int(speed)))
+        if kind not in animations.NAMES:
+            kind = None
+        was = self._anim_kind
+        self._anim_kind = kind
+        if remember:
+            self.settings["animation"] = {"kind": kind, "speed": self._anim_speed}
+            save_json(SETTINGS_FILE, self.settings)
+        self.anim_actions[kind].setChecked(True)
+        near = min(self.anim_speeds, key=lambda v: abs(v - self._anim_speed))
+        self.anim_speeds[near].setChecked(True)
+        self.anim_btn.setText(f"✨  {animations.NAMES[kind]}" if kind else "✨  Animate")
+        if kind is None:
+            self._anim_timer.stop()
+            if was:
+                self._restore_after_animation()
+            if not self.engine:
+                self.tray.setToolTip(APP_NAME)
+            return
+        if not was:
+            self._anim_t0 = time.monotonic()
+            self._anim_pos.clear()
+            for d in self.client.devices:  # devices showing an onboard effect join in; room lights decide themselves
+                if d.led_names and not getattr(self.client.driver_for(d), "keeps_state", False):
+                    self._ensure_per_led(d)
+        self._anim_timer.start(int(1000 / max(10, int(self.settings.get("fx_fps", 24)))))
+        if not self.engine:
+            self.tray.setToolTip(f"{APP_NAME} — {animations.NAMES[kind]} running")
+        self._anim_tick()
+
+    def _anim_devices(self) -> List[Device]:
+        """Devices an animation may drive: per-LED capable, and not a room light that is switched off."""
+        out = []
+        for d in self.client.devices:
+            if not d.led_names or self._per_led_mode(d) is None:
+                continue
+            drv = self.client.driver_for(d)
+            if d.current_mode.color_mode != MODE_COLORS_PER_LED:
+                continue  # the user picked an onboard effect / scene for this one: leave it alone
+            if getattr(drv, "keeps_state", False) and not any(self._shown_base(d)):
+                continue  # a room light that is off: an animation must not switch it on
+            out.append(d)
+        return out
+
+    def _anim_tick(self):
+        if not self._anim_kind or self._scanning or not self.client.connected:
+            return
+        t = time.monotonic() - self._anim_t0
+        try:
+            for d in self._anim_devices():
+                pos = self._anim_pos.get(d.index)
+                if pos is None or len(pos[0]) != len(d.colors):
+                    centres = {g.led: (g.x + g.w / 2, g.y + g.h / 2) for g in build_geometry(d)}
+                    xs, ys = animations.normalise([centres.get(i, (0.0, 0.0)) for i in range(len(d.colors))])
+                    if getattr(self.client.driver_for(d), "slow_colors", False):
+                        xs, ys = [0.5] * len(xs), [0.5] * len(ys)  # one color per frame is all it can keep up with
+                    pos = self._anim_pos[d.index] = (xs, ys)
+                base = self.base_colors.get(d.index, list(d.colors))
+                frame = animations.render(self._anim_kind, t, pos[0], pos[1], base, self._anim_speed)
+                f = self.dim.get(d.index, 100) / 100.0
+                if f < 0.999:
+                    frame = [rgb_to_u32(*(int(x * f + 0.5) for x in u32_to_rgb(c))) for c in frame]
+                self._anim_touched.add(d.index)
+                if self.engine and self.engine_dev is d:
+                    self.engine.background = frame  # typing effects render on top of the animation
+                    if self.engine.busy:
+                        continue
+                    self._fx_last_frame = None
+                self.client.update_leds(d, frame)
+                if d is self.dev:
+                    self.canvas.set_colors(frame)
+        except DeviceError as e:
+            self.statusBar().showMessage(f"Lost connection: {e}")
+            self._try_reconnect()
+
+    def _restore_after_animation(self):
+        touched, self._anim_touched = self._anim_touched, set()
+        for d in self.client.devices:
+            if d.index not in touched:
+                continue
+            base = self._shown_base(d)
+            try:
+                if self.engine and self.engine_dev is d:
+                    self.engine.background = base
+                    self._fx_last_frame = None
+                self.client.update_leds(d, base)
+            except DeviceError:
+                continue
+            if d is self.dev:
+                self.canvas.set_colors(base)
+
     # ----------------------------------------------- lights that pulse along
     def _shown_base(self, d: Device) -> List[int]:
         """The device's plain colors as they are sent (base colors with its dimming applied)."""
@@ -2648,6 +2823,8 @@ class MainWindow(QMainWindow):
     def _pulse_followers(self, restore: bool = False):
         """Room lights have no keys to ripple across, so they flash toward the color of each key press while a
         typing effect runs on the keyboard, and fall back to their own colors as it fades."""
+        if self._anim_kind and not restore:
+            return  # an animation is driving the room lights
         level, col = (0.0, (0, 0, 0)) if restore or not self.engine else self.engine.activity()
         quiet = level < 0.02
         if quiet and not self._follow_last:
@@ -2744,6 +2921,8 @@ class MainWindow(QMainWindow):
         if name in self.presets:
             snap = self.presets[name]
             self._stop_app_effect()
+            if self._anim_kind:
+                self._set_animation(None)  # a preset is a fixed look
             try:
                 apply_snapshot(self.client, snap, self.base_colors, self.dim)
             except DeviceError as e:
@@ -2834,6 +3013,13 @@ class MainWindow(QMainWindow):
         self.base_colors = {d.index: list(d.colors) for d in self.client.devices}
         self.dim = {d.index: self.dim.get(d.index, 100) for d in self.client.devices}
         self._populate_devices()
+        self._anim_pos.clear()
+        self._anim_touched.clear()
+        if self._anim_resume:
+            self._anim_resume = False
+            saved = self.settings.get("animation") or {}
+            if saved.get("kind") and self.client.devices:
+                self._set_animation(saved.get("kind"), saved.get("speed", 50), remember=False)
         fx, self._scan_resume_fx = self._scan_resume_fx, None
         if fx:
             d = next((x for x in self.client.devices if x.name == fx[0]), None)
@@ -3038,14 +3224,14 @@ class MainWindow(QMainWindow):
     def closeEvent(self, e):
         self.settings["palette"] = self.color_panel.palette_colors
         save_json(SETTINGS_FILE, self.settings)
-        if self.engine and not getattr(self, "_really_quit", False) and self.tray.isVisible():
-            # a typing effect is running: keep it alive in the tray
+        if (self.engine or self._anim_kind) and not getattr(self, "_really_quit", False) and self.tray.isVisible():
+            # a typing effect or an animation is running: keep it alive in the tray
             e.ignore()
             self.hide()
             if not self.settings.get("tray_hint_shown"):
                 self.tray.showMessage(
                     APP_NAME,
-                    "Still running in the tray so your typing effect keeps working. Right-click the tray icon to quit.",
+                    "Still running in the tray so your effect keeps playing. Right-click the tray icon to quit.",
                     QSystemTrayIcon.Information,
                     6000,
                 )
@@ -3053,6 +3239,8 @@ class MainWindow(QMainWindow):
                 save_json(SETTINGS_FILE, self.settings)
             return
         self._stop_app_effect()
+        if self._anim_kind:
+            self._set_animation(None, remember=False)  # devices go back to their own colors; it resumes next start
         self.tray.hide()
         self._keep_look_on_close()
         self.client.wait_idle(4.0)
@@ -3221,6 +3409,9 @@ def selftest() -> int:
     app = QApplication.instance() or QApplication([])
     pix_ok = icon is not None and not QIcon(str(icon)).pixmap(32, 32).isNull()
     log.info("selftest: icon renders: %s · platform %s · Qt %s", pix_ok, app.platformName(), QT_VERSION_STR)
+    from rgbdeck.hw import govee_ble
+
+    log.info("selftest: Bluetooth support: %s", govee_ble.available())
     ok = len(mods) >= 10 and pix_ok and hid_ok
     log.info("selftest: %s", "OK" if ok else "FAILED")
     print("selftest", "OK" if ok else "FAILED")
@@ -3238,6 +3429,7 @@ def main(argv: List[str]) -> int:
         if handed is not None:  # the GUI is running: let it do it (one controller per device)
             print(handed)
             return 0 if handed.startswith("applied") else 1
+        qt_core = QCoreApplication.instance() or QCoreApplication(argv[:1])  # Bluetooth lights need one
         c = LocalBackend()
         c.connect()
         snap = presets[name]
@@ -3245,7 +3437,8 @@ def main(argv: List[str]) -> int:
         fx = snap.get("app_effect")
         if fx:
             return run_headless_effect(c, snap)
-        c.close()
+        c.shutdown()
+        del qt_core
         return 0
     if "--list" in argv:
         for n in sorted(load_json(PRESETS_FILE, {})):

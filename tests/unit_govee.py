@@ -15,6 +15,7 @@ import types
 TMP = tempfile.mkdtemp(prefix="rgbdeck-govee-")
 os.environ["XDG_CONFIG_HOME"] = TMP
 os.environ["APPDATA"] = TMP
+os.environ["RGBDECK_NO_BLUETOOTH"] = "1"  # tests never touch the radio
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import rgbdeck.backend as backend  # noqa: E402
@@ -332,7 +333,10 @@ check(client.devices == [], "and removed")
 gl._config()["known"].clear()
 gl._lan.lights.clear()
 check(gl.set_settings(True, ["127.0.0.1", "not an ip"]), "settings changed")
-check(gl.get_settings() == {"enabled": True, "manual": ["127.0.0.1"]}, "invalid addresses are dropped")
+check(
+    gl.get_settings() == {"enabled": True, "manual": ["127.0.0.1"], "bluetooth": True},
+    "invalid addresses are dropped",
+)
 client.refresh()
 check(
     len(client.devices) == 1 and client.devices[0].name == "Govee light (127.0.0.1)",
@@ -424,6 +428,85 @@ check(
     f"status: refused ({rows})",
 )
 check(not client.poll_notifications(), "and it does not cause rescans")
+
+# --- the same driver over Bluetooth: raw 20-byte packets, one at a time, no second "confirm" pass
+from rgbdeck.hw import govee_ble  # noqa: E402
+
+
+class FakeBleLink:
+    """Stands in for govee_ble.Link: records packets, answers queries like an H618F showing segment colours."""
+
+    key, name, sku, suffix, state = "AA:BB:CC:DD:2A:24", "Govee_H618F_2A24", "H618F", "2A24", "ready"
+
+    def __init__(self):
+        self.sent, self.power, self.brightness, self.status_at = [], True, 35, 0.0
+
+    def send(self, packets, wait=True):
+        self.sent.extend(bytes(p) for p in packets)
+        return True
+
+    def ask(self, packet):
+        q = bytes(packet[:3])
+        if q[:2] == b"\xaa\x01":
+            return govee_ble.checksum(b"\xaa\x01\x01")
+        if q[:2] == b"\xaa\x04":
+            return govee_ble.checksum(b"\xaa\x04\x23")
+        if q[:2] == b"\xaa\x05":
+            return govee_ble.checksum(b"\xaa\x05\x15")
+        if q[:2] == b"\xaa\xa5":
+            n = 3 if q[2] == 4 else 4  # 15 segments: the last group holds three
+            return govee_ble.checksum(b"\xaa\xa5" + bytes([q[2]]) + bytes([100, 255, 0, 0]) * n)
+        return None
+
+
+check(govee_ble.parse_name("Govee_H618F_2A24") == ("H618F", "2A24"), "advertising name gives model and id suffix")
+check(govee_ble.parse_name("ihoment_H6181_1b2c") == ("H6181", "1B2C"), "older name prefix")
+check(govee_ble.parse_name("JBL Flip 5") is None, "other devices are ignored")
+check(len(govee_ble.checksum(b"\x33\x01\x01")) == 20 and govee_ble.checksum(b"\x33\x01\x01")[-1] == 0x33, "checksum")
+fake = FakeBleLink()
+blink = gl._BleLink(fake, gl.lookup("H618F"))
+state = blink.read_state()
+check(
+    state.get("onOff") == 1 and state.get("brightness") == 35 and len(state.get("segments", [])) == 15,
+    f"state read over Bluetooth ({state})",
+)
+bt = gl.GoveeLight(blink, gl._Light(fake.key, "", "H618F"), state)
+check(bt.device.description.startswith("Bluetooth light"), "device says how it is connected")
+check(
+    len(bt.device.colors) == 15 and u32_to_rgb(bt.device.colors[0]) == (89, 0, 0),
+    f"segment colours adopted at the light's brightness ({u32_to_rgb(bt.device.colors[0])})",
+)
+bt.set_colors([rgb_to_u32(0, 0, 255)] * 15)
+time.sleep(0.3)
+check(
+    [p[:7].hex() for p in fake.sent] == ["33046400000000", "330515010000ff"] and fake.sent[1][12:14] == b"\xff\x7f",
+    f"one colour: brightness to 100, then one packet for all 15 segments ({[p[:14].hex() for p in fake.sent]})",
+)
+fake.sent.clear()
+two = [rgb_to_u32(0, 0, 255)] * 15
+two[2] = rgb_to_u32(255, 0, 0)
+bt.set_colors(two)
+time.sleep(0.9)
+check(
+    len(fake.sent) == 1 and fake.sent[0][4:7] == b"\xff\x00\x00" and fake.sent[0][12] == 0x04,
+    f"only the changed segment is sent, and not a second time ({[p[:14].hex() for p in fake.sent]})",
+)
+fake.sent.clear()
+bt.set_mode(bt.device.mode_named("Warm White"))
+time.sleep(0.3)
+r, g, b = fake.sent[0][4:7]
+check(fake.sent[0][:4] == b"\x33\x05\x15\x01" and r == 255 and g > b > 0, f"white is sent as its colour ({(r, g, b)})")
+fake.sent.clear()
+fake.power, fake.status_at = False, time.monotonic() + 1  # somebody switched it off with the phone
+time.sleep(0.05)
+bt.set_colors([rgb_to_u32(0, 255, 0)] * 15)
+time.sleep(0.3)
+check(fake.sent and fake.sent[0][:3] == b"\x33\x01\x01", "switched back on when the light reported itself off")
+fake.sent.clear()
+bt.set_mode(bt.device.mode_named("Off"))
+bt.close()
+check(fake.sent == [govee_ble.checksum(b"\x33\x01\x00")], "close delivers what was still waiting")
+check(gl.kelvin_rgb(6600)[0] >= 250 and gl.kelvin_rgb(2000)[2] < 80, "kelvin to colour")
 
 client.shutdown()
 gl._reset_for_tests()
