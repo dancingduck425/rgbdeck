@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.10.0 — 2026-11-11
+
+- **Corsair iCUE Commander Duo** (1b1c:0c56), experimental: both ARGB ports with per-LED colors. Corsair fans
+  and strips are detected by the hub; for any other ARGB strip set the port's **LED count** in the app (up to
+  204) and the hub is told. The hub drops host control after 30–60 s of silence, so the colors are repeated
+  every 8 s, and a dropped session is re-entered. Fans and temperature probes are not touched. Written from the
+  protocol notes of OpenLinkHub and the corsair-cduo Linux driver and tested against a simulated hub only:
+  **not yet confirmed on hardware**. iCUE has to be closed.
+- **ASUS Aura mainboards**: the controller is found by its HID usage page instead of a fixed interface number,
+  and a board that is found but skipped now says why in the log (before, it was skipped silently).
+- `docs/v92-capture/`: how to record the Dark Flash V92 screen's USB traffic, with test images, as the first
+  step toward supporting it.
+
 ## 1.9.2 — 2026-11-10
 
 - **The update check runs at every start**, right after the devices are found (before: 25 seconds in, and only

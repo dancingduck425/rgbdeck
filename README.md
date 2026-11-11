@@ -49,6 +49,7 @@ on physical devices** — they are marked *experimental*. If you own one, please
 | Logitech mice & headsets | G203/G303/G403/G502/G703/G900/G903/G Pro families, G633/G635/G733/G933/G935; Lightspeed, Powerplay and Unifying receivers | experimental |
 | Corsair peripherals | K55/K65/K68/K70/K95/Strafe, M65/Scimitar/Glaive/Harpoon/Ironclaw/Nightsword/Dark Core, MM800, ST100, and the newer iCUE "V2" keyboards/mice/mousemats | experimental |
 | Corsair Lighting Node / Commander | Lighting Node PRO & CORE, Commander PRO LED channels, LS100, LT100, 1000D, SPEC OMEGA (set your LED count per channel in the app) | experimental |
+| Corsair iCUE Commander Duo | Both ARGB ports, per-LED colors; set the LED count per port for strips the hub can't detect. Fans and temperature probes are left alone | experimental |
 | SteelSeries | Rival 100–710, Rival 3/5, Sensei, Aerox 3/5/9, Apex 3/5/7/9/Pro/TKL/M750, Arctis 5/Nova 3, Siberia 350, QcK Prism | experimental |
 | Govee Wi-Fi lights (LAN API) | Any model with the "LAN Control" switch in the Govee Home app: on/off, brightness, color, whites. 272 models have their segment counts and firmware scenes built in (H618x/H619x strips, Glide, TV backlights, bulbs, lamps…). | experimental |
 | Govee lights over Bluetooth | Used by itself when a light is in range and not reachable over the LAN API (LAN Control off, Bluetooth-only models). Segmented RGBIC lights use the same packets as over the LAN; confirmed on an H618F strip. Other models: on/off, brightness, color | H618F ✅ verified, others experimental |
@@ -232,5 +233,7 @@ GPL; each ported module names the OpenRGB source files it came from.
 Device protocols were learned from the driver sources of [OpenRGB](https://gitlab.com/CalcProgrammer1/OpenRGB)
 (GPL-2.0-or-later) and [korkje/mxw](https://github.com/korkje/mxw) (MIT). The Govee driver follows Govee's public LAN API
 guide; its per-model table (segment counts, scene codes) was compiled from
-[govee-local-api](https://github.com/Galorhallen/govee-local-api) (Apache-2.0). RGB Deck does not use or depend on any
-of them at runtime.
+[govee-local-api](https://github.com/Galorhallen/govee-local-api) (Apache-2.0). The Corsair Commander Duo driver was
+written from the protocol as documented by [OpenLinkHub](https://github.com/jurkovic-nikola/OpenLinkHub) and the
+[corsair-cduo](https://github.com/davemistretta/corsair-cduo-public) Linux driver's notes (packet formats only, no
+code). RGB Deck does not use or depend on any of them at runtime.

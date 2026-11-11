@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import List
 
 from rgbdeck.models import (
@@ -20,7 +21,10 @@ from rgbdeck.models import (
     MODE_FLAG_MANUAL_SAVE,
     u32_to_rgb,
 )
+from rgbdeck.hw.hidinfo import parse_collections
 from rgbdeck.hw.hidraw import HidDevice, enumerate_hid
+
+log = logging.getLogger("rgbdeck.aura")
 
 VID = 0x0B05
 PIDS = {0x19AF, 0x1939, 0x18F3, 0x1867, 0x1872, 0x1889}  # Aura USB mainboard controllers
@@ -156,11 +160,26 @@ class AuraMainboard:
 
 def probe() -> List[AuraMainboard]:
     found = []
+    seen = set()
     for info in enumerate_hid(VID):
-        if info.pid not in PIDS or info.interface != 2:
+        if info.pid not in PIDS or not _is_aura_interface(info):
             continue
         try:
             found.append(AuraMainboard(info.path, info.name or "ASUS Aura Mainboard"))
-        except DeviceError:
-            continue
+            seen.add(info.pid)
+        except DeviceError as e:
+            # said out loud: "found but skipped" is the first thing to know when a board does not show up
+            log.info("ASUS Aura %04x at %s (interface %s) skipped: %s", info.pid, info.path, info.interface, e)
     return found
+
+
+def _is_aura_interface(info) -> bool:
+    """The controller's own HID collection has usage page ff72. Where the descriptor cannot be read, fall back
+    to interface 2 (where it sits on the boards seen so far) or a device with a single interface."""
+    try:
+        pages = {page for page, _usage, _ids in parse_collections(info.descriptor or b"")}
+    except Exception:  # noqa: BLE001
+        pages = set()
+    if pages:
+        return 0xFF72 in pages
+    return info.interface in (2, -1)

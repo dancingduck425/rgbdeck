@@ -38,6 +38,7 @@ FROZEN_DRIVER_MODULES = (
     "logitech_mouse",
     "corsair_peripheral",
     "corsair_lighting_node",
+    "corsair_commander_duo",
     "steelseries",
     "hyperx",
     "govee_lan",
