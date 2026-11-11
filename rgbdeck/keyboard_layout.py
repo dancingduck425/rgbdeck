@@ -11,7 +11,7 @@ Anything unmatched is laid out in a strip below the board.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from rgbdeck.models import Device, Zone, NO_LED
 
@@ -24,6 +24,29 @@ class KeyGeom:
     w: float
     h: float
     label: str
+    shape: str = "key"  # key (rounded square) | pill | dot
+    pos: Optional[Tuple[float, float]] = None  # where it counts as being for effects, if not where it is drawn
+
+    def centre(self) -> Tuple[float, float]:
+        return self.pos if self.pos is not None else (self.x + self.w / 2, self.y + self.h / 2)
+
+
+class Layout(list):
+    """The KeyGeoms of one device, plus what is drawn behind them (see device_shapes.py). backdrop None means
+    the plain plate; size is the extent of the whole picture in the same units."""
+
+    def __init__(
+        self, geoms=(), backdrop: Optional[list] = None, size: Optional[Tuple[float, float]] = None, kind="grid"
+    ):
+        super().__init__(geoms)
+        self.backdrop = backdrop
+        self.size = size
+        self.kind = kind
+
+    def extent(self) -> Tuple[float, float]:
+        if self.size is not None:
+            return self.size
+        return max(g.x + g.w for g in self), max(g.y + g.h for g in self)
 
 
 LABELS = {
@@ -351,16 +374,29 @@ def build_generic_geometry(dev: Device, per_row: int = 16) -> List[KeyGeom]:
             full = dev.led_names[led] if led < len(dev.led_names) else ""
             for prefix in (z.name, z.name.rstrip("s")):  # "Channel 1, LED 3" / zone "Segments" + "Segment 3"
                 if prefix and full.startswith(prefix):
-                    label = label_for(full[len(prefix) :].strip(" ,")) or str(n + 1)
+                    rest = full[len(prefix) :].strip(" ,")
+                    # a light named exactly like its zone ("Logo") keeps the name; one of many gets its number
+                    label = label_for(rest) if rest else (label if z.leds_count == 1 else str(n + 1))
                     break
             geoms.append(KeyGeom(led, (n % per_row) * 1.0, y + (n // per_row), 1.0, 1.0, label))
         y += (z.leds_count + per_row - 1) // per_row + 0.6
     return geoms
 
 
-def build_geometry(dev: Device) -> List[KeyGeom]:
+def build_geometry(dev: Device) -> Layout:
     if dev.type_name == "Keyboard":
         g = build_keyboard_geometry(dev)
         if g:
-            return g
-    return build_generic_geometry(dev)
+            return Layout(g, kind="keyboard")
+    else:
+        from rgbdeck import device_shapes  # here: that module needs this one
+
+        shaped = device_shapes.build(dev)
+        if shaped:
+            return shaped
+    return Layout(build_generic_geometry(dev))
+
+
+def effect_positions(dev: Device) -> dict:
+    """LED index -> where that light counts as being, for effects, animations and gradients."""
+    return {g.led: g.centre() for g in build_geometry(dev)}

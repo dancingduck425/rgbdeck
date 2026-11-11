@@ -60,6 +60,14 @@ Not supported on purpose: RAM and GPU lighting (driven over I²C/SMBus, where a 
 something to ship untested). Everything else: see [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a driver, or
 open a device-support issue with your `lsusb` line.
 
+### How devices are shown
+
+Keyboards are drawn key by key. Other devices get a picture of what they are, with their lights placed by
+name: mice, light strips (long ones folded into rows), lamps, headsets, mouse mats and mainboards. Anything
+else is a grid of labelled squares. Click or drag on the picture to paint.
+
+![Device pictures](docs/device-pictures.png)
+
 ### Govee lights
 
 0. **Nothing to set up if the light is within Bluetooth range of the PC**: RGB Deck finds it and drives it over

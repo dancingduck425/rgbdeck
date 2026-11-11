@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.11.0 — 2026-11-11
+
+- **Devices are drawn as what they are.** Until now only keyboards had a real picture; everything else was
+  rows of boxes. Now:
+  - a **mouse** is a mouse, with its lights where their names put them (scroll wheel, logo, left and right
+    sides, front / middle / rear, an underglow ring round the back);
+  - a **light strip** is a strip of round lights; a long one is folded into rows with the bends drawn, and
+    a hub with several channels shows one named strip per channel;
+  - a single **lamp**, a **headset** (two ear cups), a **mouse mat** (lit edge) and a **mainboard** (board
+    outline with the lights along its edge) get their own pictures too;
+  - a device without separately addressable lights (many wireless mice) is shown as its outline filled with
+    its color instead of a plain block.
+  Painting, selecting and gradients work on the pictures as they did on the boxes.
+- Effects and gradients on a folded strip still run along the strip from end to end (before, a strip longer
+  than 16 lights wrapped and a wave folded back on itself).
+- Where a light physically sits is not something a device reports, so placement goes by the lights' names
+  and is a sensible guess for anything unnamed. Devices that report a key matrix, and types without a picture
+  yet (microphones, speakers, graphics cards), keep the grid; lights named like their zone now show the name
+  instead of "1".
+
 ## 1.10.1 — 2026-11-11
 
 - **Windows: opening Lights, ticking "Look for Govee lights" or pressing Search could close the whole app.**

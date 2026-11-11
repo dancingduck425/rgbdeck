@@ -128,7 +128,8 @@ def setup_logging(verbose: bool):
     )
 
 
-from rgbdeck.keyboard_layout import KeyGeom, build_geometry  # noqa: E402
+from rgbdeck.keyboard_layout import KeyGeom, Layout, build_geometry, effect_positions  # noqa: E402
+from rgbdeck import device_shapes  # noqa: E402
 from rgbdeck.hw import govee_lan, wled  # noqa: E402
 from rgbdeck import animations, audio, automation, remote, sensors, updater  # noqa: E402
 from rgbdeck.director import Director  # noqa: E402
@@ -748,12 +749,72 @@ class LedCanvas(QWidget):
         self.fallback_colors = list(colors)
         self.update()
 
+    def _extent(self):
+        if isinstance(self.geoms, Layout):
+            return self.geoms.extent()
+        return max(g.x + g.w for g in self.geoms), max(g.y + g.h for g in self.geoms)
+
     def _scale(self):
-        maxx = max(g.x + g.w for g in self.geoms)
-        maxy = max(g.y + g.h for g in self.geoms)
+        maxx, maxy = self._extent()
         pad = 26
         s = min((self.width() - 2 * pad) / maxx, (self.height() - 2 * pad) / maxy)
         return s, (self.width() - maxx * s) / 2, (self.height() - maxy * s) / 2
+
+    @staticmethod
+    def _step_path(step, s, ox, oy) -> QPainterPath:
+        """One backdrop step (device_shapes.py) as a painter path in widget coordinates."""
+        path = QPainterPath()
+        kind = step[0]
+        if kind == "rrect":
+            _k, x, y, w, h, r, _style = step
+            path.addRoundedRect(QRectF(ox + x * s, oy + y * s, w * s, h * s), r * s, r * s)
+        elif kind == "ellipse":
+            _k, cx, cy, rx, ry, _style = step
+            path.addEllipse(QPointF(ox + cx * s, oy + cy * s), rx * s, ry * s)
+        elif kind == "line":
+            _k, x1, y1, x2, y2, _style = step
+            path.moveTo(ox + x1 * s, oy + y1 * s)
+            path.lineTo(ox + x2 * s, oy + y2 * s)
+        elif kind == "path":
+            for cmd in step[1]:
+                v = [(ox if i % 2 == 0 else oy) + c * s for i, c in enumerate(cmd[1:])]
+                if cmd[0] == "M":
+                    path.moveTo(v[0], v[1])
+                elif cmd[0] == "L":
+                    path.lineTo(v[0], v[1])
+                elif cmd[0] == "C":
+                    path.cubicTo(v[0], v[1], v[2], v[3], v[4], v[5])
+                elif cmd[0] == "Z":
+                    path.closeSubpath()
+        return path
+
+    def _paint_backdrop(self, p: QPainter, backdrop, s, ox, oy):
+        for step in backdrop:
+            style = step[-1]
+            if step[0] == "text":
+                f = QFont(self.font())
+                f.setPixelSize(max(9, int(s * 0.5)))
+                p.setFont(f)
+                p.setPen(QColor("#7d8398"))
+                p.drawText(QPointF(ox + step[1] * s, oy + step[2] * s), step[3])
+                continue
+            path = self._step_path(step, s, ox, oy)
+            if style == "body":
+                p.setPen(QPen(QColor("#2c303c"), 1.5))
+                p.setBrush(QColor("#1d2029"))
+            elif style == "tape":
+                p.setPen(QPen(QColor("#2a2e3a"), 1.0))
+                p.setBrush(QColor("#1a1d25"))
+            elif style == "inset":
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor("#14161c"))
+            elif style == "band":
+                p.setPen(QPen(QColor("#252933"), max(3.0, s * 0.42), Qt.SolidLine, Qt.RoundCap))
+                p.setBrush(Qt.NoBrush)
+            else:  # detail
+                p.setPen(QPen(QColor("#323746"), max(1.2, s * 0.05), Qt.SolidLine, Qt.RoundCap))
+                p.setBrush(Qt.NoBrush)
+            p.drawPath(path)
 
     def _rect(self, g, s, ox, oy):
         gap = max(2.0, s * 0.08)
@@ -781,13 +842,15 @@ class LedCanvas(QWidget):
             self._paint_glyph(p)
             return
         s, ox, oy = self._scale()
-        # board plate
-        maxx = max(g.x + g.w for g in self.geoms)
-        maxy = max(g.y + g.h for g in self.geoms)
-        plate = QRectF(ox - 12, oy - 12, maxx * s + 24, maxy * s + 24)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#1d2029"))
-        p.drawRoundedRect(plate, 16, 16)
+        backdrop = getattr(self.geoms, "backdrop", None)
+        if backdrop:  # the device's own outline
+            self._paint_backdrop(p, backdrop, s, ox, oy)
+        else:  # board plate
+            maxx, maxy = self._extent()
+            plate = QRectF(ox - 12, oy - 12, maxx * s + 24, maxy * s + 24)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#1d2029"))
+            p.drawRoundedRect(plate, 16, 16)
         font = QFont(self.font())
         font.setPixelSize(max(7, int(s * 0.27)))
         p.setFont(font)
@@ -797,7 +860,13 @@ class LedCanvas(QWidget):
             col = u32_to_qcolor(self.colors[g.led]) if g.led < len(self.colors) else QColor(0, 0, 0)
             lum = 0.299 * col.red() + 0.587 * col.green() + 0.114 * col.blue()
             kp = QPainterPath()
-            kp.addRoundedRect(r, s * 0.14, s * 0.14)
+            if g.shape == "key":
+                kp.addRoundedRect(r, s * 0.14, s * 0.14)
+            elif g.shape == "dot":
+                kp.addEllipse(r)
+            else:  # pill
+                round_ = min(r.width(), r.height()) / 2
+                kp.addRoundedRect(r, round_, round_)
             if lum > 2:
                 glow = QRadialGradient(r.center(), max(r.width(), r.height()) * 0.9)
                 gc = QColor(col)
@@ -823,7 +892,7 @@ class LedCanvas(QWidget):
                 p.setPen(QPen(QColor(255, 255, 255, 150), 1.5))
                 p.setBrush(Qt.NoBrush)
                 p.drawPath(kp)
-            if g.label and s > 13:
+            if g.label and s > 13 and r.width() > fm.horizontalAdvance(g.label[:2]) + 2:
                 p.setPen(QColor(255, 255, 255, 215) if lum < 150 else QColor(0, 0, 0, 210))
                 p.drawText(r, Qt.AlignCenter, fm.elidedText(g.label, Qt.ElideRight, int(r.width() - 2)))
         if self._rubber:
@@ -837,11 +906,21 @@ class LedCanvas(QWidget):
         w, h = self.width(), self.height()
         cx, cy = w / 2, h / 2
         size = min(w, h) * 0.6
-        if self.dev_type == "Mouse":
+        outline = device_shapes.glyph(self.dev_type)
+        details = []
+        if outline is not None:  # the device's own outline, filled with its color
+            ew, eh = outline.extent()
+            gs = min(w * 0.8 / ew, (h - 70) * 0.92 / eh)
+            gx, gy = cx - ew * gs / 2, cy - 14 - eh * gs / 2
             body = QPainterPath()
-            body.addRoundedRect(
-                QRectF(cx - size * 0.28, cy - size * 0.48, size * 0.56, size * 0.96), size * 0.26, size * 0.26
-            )
+            body.setFillRule(Qt.WindingFill)
+            for step in outline.backdrop:
+                if step[-1] == "body":
+                    body.addPath(self._step_path(step, gs, gx, gy))
+                else:
+                    details.append((step, gs, gx, gy))
+            size = eh * gs
+            cy = gy + size / 2
         else:
             body = QPainterPath()
             body.addRoundedRect(QRectF(cx - size * 0.45, cy - size * 0.32, size * 0.9, size * 0.64), 18, 18)
@@ -868,15 +947,19 @@ class LedCanvas(QWidget):
         p.setOpacity(0.9)
         p.drawPath(body)
         p.setOpacity(1.0)
-        if self.dev_type == "Mouse":
-            p.setPen(QPen(QColor(0, 0, 0, 120), 2))
-            p.drawLine(QPointF(cx, cy - size * 0.48), QPointF(cx, cy - size * 0.1))
-            p.setBrush(QColor(0, 0, 0, 120))
-            p.setPen(Qt.NoPen)
-            p.drawRoundedRect(QRectF(cx - size * 0.035, cy - size * 0.36, size * 0.07, size * 0.14), 4, 4)
+        for step, gs, gx, gy in details:  # seams, wheel, slots: dark on the lit body
+            path = self._step_path(step, gs, gx, gy)
+            if step[-1] == "inset":
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(0, 0, 0, 120))
+            else:
+                width = max(3.0, gs * 0.42) if step[-1] == "band" else max(1.5, gs * 0.06)
+                p.setPen(QPen(QColor(0, 0, 0, 120), width, Qt.SolidLine, Qt.RoundCap))
+                p.setBrush(Qt.NoBrush)
+            p.drawPath(path)
         p.setPen(QColor("#8d93a8"))
         p.drawText(
-            QRectF(0, cy + size * 0.52, w, 30),
+            QRectF(0, min(h - 34, cy + size * 0.52 + 6), w, 30),
             Qt.AlignCenter,
             "This device is lit by its effect — pick a color or an effect on the right.",
         )
@@ -3234,7 +3317,7 @@ class MainWindow(QMainWindow):
         self._set_targets(mp)
 
     def _axis(self, targets, axis):
-        vals = [g.x + g.w / 2 for g in targets] if axis == "h" else [g.y + g.h / 2 for g in targets]
+        vals = [g.centre()[0] for g in targets] if axis == "h" else [g.centre()[1] for g in targets]
         lo, hi = min(vals), max(vals)
         return vals, lo, max(hi, lo + 1e-6)
 
@@ -3361,7 +3444,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("This device has no per-key mode, so typing effects can't run on it.", 5000)
             return
         geoms = build_geometry(d)
-        pos = {g.led: (g.x + g.w / 2, g.y + g.h / 2) for g in geoms}
+        pos = {g.led: g.centre() for g in geoms}
         name_to_led = {(n[5:] if n.startswith("Key: ") else n): i for i, n in enumerate(d.led_names)}
         settings.kind = kind
         settings.fps = int(self.settings.get("fx_fps", settings.fps))
@@ -3601,7 +3684,7 @@ class MainWindow(QMainWindow):
             for d, kind in self._anim_devices():
                 pos = self._anim_pos.get(d.index)
                 if pos is None or len(pos[0]) != len(d.colors):
-                    centres = {g.led: (g.x + g.w / 2, g.y + g.h / 2) for g in build_geometry(d)}
+                    centres = effect_positions(d)
                     xs, ys = animations.normalise([centres.get(i, (0.0, 0.0)) for i in range(len(d.colors))])
                     if getattr(self.client.driver_for(d), "slow_colors", False):
                         xs, ys = [0.5] * len(xs), [0.5] * len(ys)  # one color per frame is all it can keep up with
@@ -4400,7 +4483,7 @@ def run_headless_effect(client: LocalBackend, snap: dict) -> int:
     if fx:
         fx_dev = next((d for d in client.devices if d.name == fx.get("device")), None)
     if fx_dev:
-        pos = {g.led: (g.x + g.w / 2, g.y + g.h / 2) for g in build_geometry(fx_dev)}
+        pos = effect_positions(fx_dev)
         name_to_led = {(n[5:] if n.startswith("Key: ") else n): i for i, n in enumerate(fx_dev.led_names)}
         settings = EffectSettings.from_dict(fx)
         fps = settings.fps
@@ -4422,7 +4505,7 @@ def run_headless_effect(client: LocalBackend, snap: dict) -> int:
             base = base_of(d)
             if getattr(drv, "keeps_state", False) and not any(base):
                 continue
-            centres = {g.led: (g.x + g.w / 2, g.y + g.h / 2) for g in build_geometry(d)}
+            centres = effect_positions(d)
             xs, ys = animations.normalise([centres.get(i, (0.0, 0.0)) for i in range(len(d.colors))])
             if getattr(drv, "slow_colors", False):
                 xs, ys = [0.5] * len(xs), [0.5] * len(ys)
