@@ -4541,7 +4541,12 @@ def selftest() -> int:
     from rgbdeck.hw import govee_ble
 
     log.info("selftest: Bluetooth support: %s", govee_ble.available())
-    ok = len(mods) >= 10 and pix_ok and hid_ok
+    ble_wrong: List[str] = []
+    if govee_ble._helper_mode() and govee_ble.available():  # Windows: the radio lives in a helper process
+        ble_wrong = govee_ble.helper_selftest()
+        for problem in ble_wrong:
+            log.error("selftest: Bluetooth helper: %s", problem)
+    ok = len(mods) >= 10 and pix_ok and hid_ok and not ble_wrong
     log.info("selftest: %s", "OK" if ok else "FAILED")
     print("selftest", "OK" if ok else "FAILED")
     return 0 if ok else 1

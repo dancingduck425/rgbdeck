@@ -408,7 +408,8 @@ def search_network(networks: Optional[List[ipaddress.IPv4Network]] = None, progr
         "blind": blind,
         "hosts": hosts,
         "bluetooth": bluetooth,
-        "bluetooth_error": govee_ble.scan_error() if radio else "",
+        # also when the radio could not even be started (it keeps stopping on this PC, for instance)
+        "bluetooth_error": govee_ble.scan_error() if cfg["bluetooth"] else "",
     }
 
 

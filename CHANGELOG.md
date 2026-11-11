@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.10.1 — 2026-11-11
+
+- **Windows: opening Lights, ticking "Look for Govee lights" or pressing Search could close the whole app.**
+  All three start a Bluetooth scan, and Qt's Bluetooth code for Windows ends the process it runs in when
+  Windows refuses one of its calls (its own source says so; on Windows 11 it is also known to hang). On
+  Windows, Bluetooth now runs in a small **helper process** next to RGB Deck. If the helper dies or stops
+  answering, RGB Deck keeps running: Bluetooth lights count as out of reach, the Lights panel says that
+  Bluetooth stopped on this PC, and `rgbdeck.log` records the exit code and what was being done. The helper is
+  restarted after a pause; after three losses in a row Bluetooth is left alone until the next start. Network
+  (LAN) lights are not affected either way.
+- Which Windows call fails on the PC this was reported from is not known yet: this release keeps the app
+  alive and makes the log say it. Whether Bluetooth lights then work on that PC is a separate question the
+  log will answer.
+- Linux keeps Bluetooth inside the app as before (`RGBDECK_BLE_HELPER=1` moves it to the helper there too;
+  checked that way against a real H618F: scan, connect, queries, writes, clean shutdown).
+- A Bluetooth scan whose end is never reported counts as over after 15 s instead of leaving "Searching…"
+  up, two scan requests at the same moment can no longer overlap, and a Bluetooth thread that does not stop in
+  time is left alone rather than killed.
+- The build check (`--selftest`) starts the helper from the packaged program, lets it scan, and kills it in
+  the middle of a scan to confirm the app survives.
+
 ## 1.10.0 — 2026-11-11
 
 - **Corsair iCUE Commander Duo** (1b1c:0c56), experimental: both ARGB ports with per-LED colors. Corsair fans

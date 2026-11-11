@@ -79,7 +79,10 @@ open a device-support issue with your `lsusb` line.
    You can also type an address there yourself.
 
 On Windows, looking for lights is off until you tick **Settings → Find Govee lights on my network**, because
-Windows then asks once whether RGB Deck may use your network.
+Windows then asks once whether RGB Deck may use your network. Bluetooth runs in a separate helper process
+there (a second `RGBDeck.exe` in Task Manager while Bluetooth is in use): Qt's Bluetooth code for Windows can
+take the process it runs in down with it, and this way that process is not the app. Bluetooth on Windows has
+not been confirmed on real hardware yet.
 
 The light shows up as one more device: paint its segments like keys (or set the LED count to 1 to treat it as a
 single lamp), pick a white or one of its own scenes from the effect chips, and it follows *Sync all devices*.
@@ -190,6 +193,7 @@ the same keyboard confuse each other.
 | Glorious mouse ignores colors | Its lighting is stored per onboard profile (1–3) and most tools only write profile 1. RGB Deck writes all three; if it still ignores you, press the profile button once. While on its cable the mouse still shows your colors — a solid color after charging is just the profile it is on. |
 | Govee light not found | Switch on **LAN Control** for it in the Govee Home app, same network as the PC, and let incoming UDP 4002 through the firewall — or add its address in **Settings → Network lights**. Another program on this PC that listens on that port (Govee Desktop, Home Assistant) also takes the answers away. |
 | Govee light keeps dropping off over Bluetooth | It is at the edge of Bluetooth range, or the Govee app on a nearby phone grabbed the connection. Switch on LAN Control for it, or untick **Use Bluetooth…** in the Lights panel. |
+| Windows: "Bluetooth stopped unexpectedly on this PC" | The Bluetooth helper died; RGB Deck itself carries on and network (LAN) lights still work. `%APPDATA%\rgbdeck\rgbdeck.log` has a line "Bluetooth helper ended unexpectedly" with the exit code: please open an issue with it. To stop RGB Deck from trying, untick **Use Bluetooth…** in the Lights panel. |
 | Govee segments show wrong / nothing | Set **LED count** to 1 to drive it as one light, and please open an issue with the model number. |
 | Typing effects don't react | They read `/dev/input/event*`. logind grants that to the active session; otherwise add your user to the `input` group. The hint under the effect chips says which input devices are being listened to. |
 | Keyboard flickers / lags while dragging the wheel | Frames are capped per device (Logitech ≈ 20 fps). If another program is also writing to the keyboard, close it. |
