@@ -53,6 +53,8 @@ class FakeProc:
         self.code = -9
 
 
+real_end_process = ble._end_process
+ble._end_process = lambda proc: proc.kill()  # the scripted helper has no process to end
 check(ble._helper_mode(), "helper mode can be forced on any system")
 check(ble.available(), "with the helper, Bluetooth counts as available without Qt in this process")
 
@@ -173,6 +175,7 @@ r4._read()
 check(ble._helper["crashes"] == 0 and ble.scan_error() == "", "an asked-for end is not counted as a loss")
 
 # ---------------------------------------------------------------------------- a real helper, no hardware needed
+ble._end_process = real_end_process
 ble._helper.update(crashes=0, retry_at=0.0, disabled="")
 check(ble.start(lambda advert: False), "a real helper process starts")
 radio = ble._radio
