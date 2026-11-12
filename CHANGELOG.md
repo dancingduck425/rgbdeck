@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.11.1 — 2026-11-11
+
+- **Windows: "Update now" works from start to finish.** After the download, the step that runs the new setup
+  and starts RGB Deck again was handed to Windows in a form its command line garbles, and the freshly started
+  program could inherit settings pointing at the old one's temporary files. Both are fixed: RGB Deck closes,
+  the setup runs, the new version opens.
+  **Versions up to 1.11.0 still contain the faulty step, so get this one by hand once:** download
+  `RGBDeck-Setup-1.11.1.exe` from the release page and run it. Updates after that go through the window.
+- **Closing a dialog never ends the program** while the main window sits in the tray (Later / Skip in the
+  update window, for example).
+- The Windows build now tries the whole thing on every change: it installs the setup, lets the update window
+  press Later, Skip and Update now by itself, and checks that RGB Deck is still running, or running again,
+  afterwards (installed copy and single exe).
+
 ## 1.11.0 — 2026-11-11
 
 - **Devices are drawn as what they are.** Until now only keyboards had a real picture; everything else was
