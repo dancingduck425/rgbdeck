@@ -339,6 +339,38 @@ def build_mainboard(dev: Device) -> Optional[Layout]:
     return Layout(geoms, _board_backdrop(), (12.0, 12.6), "mainboard")
 
 
+GPU_W, GPU_H = 16.0, 6.6
+
+
+def _gpu_backdrop() -> list:
+    steps = [
+        ("rrect", 0.2, 1.5, 0.5, 4.6, 0.1, "inset"),  # slot bracket
+        ("rrect", 0.7, 1.3, 14.9, 4.9, 0.5, "body"),  # shroud
+        ("rrect", 3.0, 6.2, 5.2, 0.3, 0.08, "inset"),  # slot connector
+    ]
+    for i in range(3):
+        cx = 3.35 + i * 4.75
+        steps += [("ellipse", cx, 3.9, 1.95, 1.95, "inset"), ("ellipse", cx, 3.9, 0.55, 0.55, "detail")]
+    return steps
+
+
+def build_gpu(dev: Device) -> Optional[Layout]:
+    """A graphics card seen from its fan side; its lights run along the top edge, the one you see in a case."""
+    if _has_matrix(dev):
+        return None
+    leds = [(led, _short(dev, z, led, n)) for z in dev.zones for n, led in enumerate(_leds(z))]
+    if not leds:
+        return None
+    room = 14.3
+    step = room / len(leds)
+    size = min(0.85, step * 0.9)
+    geoms = [
+        KeyGeom(led, 1.0 + step * (i + 0.5) - size / 2, 0.65 - size / 2, size, size, label if size > 0.7 else "", "dot")
+        for i, (led, label) in enumerate(leds)
+    ]
+    return Layout(geoms, _gpu_backdrop(), (GPU_W, GPU_H), "gpu")
+
+
 # ----------------------------------------------------------------------------- which picture for which device
 def build(dev: Device) -> Optional[Layout]:
     """The picture for this device, or None when the plain grid serves it better."""
@@ -351,6 +383,8 @@ def build(dev: Device) -> Optional[Layout]:
         return build_headset(dev)
     if kind == "Motherboard":
         return build_mainboard(dev)
+    if kind == "GPU":
+        return build_gpu(dev)
     zones = [z for z in dev.zones if z.leds_count]
     if kind in STRIP_TYPES or (zones and all(z.type == ZONE_LINEAR and z.leds_count >= 2 for z in zones)):
         return build_strip(dev)
@@ -369,6 +403,8 @@ def glyph(type_name: str) -> Optional[Layout]:
         return Layout([], [("rrect", 0.8, 0.8, 14.0, 9.0, 0.7, "body")], (15.6, 10.6), "mousemat")
     if type_name == "Motherboard":
         return Layout([], _board_backdrop(), (12.0, 12.6), "mainboard")
+    if type_name == "GPU":
+        return Layout([], _gpu_backdrop(), (GPU_W, GPU_H), "gpu")
     if type_name in STRIP_TYPES:
         return Layout([], [("rrect", 0.5, 0.5, 12.0, 1.3, 0.3, "body")], (13.0, 2.3), "strip")
     return None

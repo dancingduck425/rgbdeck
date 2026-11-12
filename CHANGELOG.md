@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.12.0 — 2026-11-12
+
+- **ASUS graphics cards light up too** (ROG Strix, TUF and KO cards with an NVIDIA chip, RTX 30, 40 and 50
+  series). The card shows up as a device with a picture of its own; every light on it can be painted, takes
+  part in Sync, animations and presets, and the card's own effects (Static, Breathing, Rainbow, ...) can be
+  chosen and stored in the card. On Windows this goes through the NVIDIA driver that is already installed.
+  - **Experimental: written from the controller's known behaviour, not yet tried on a real card.** If the
+    card does not show up or the colors are off, `rgbdeck.log` has a line starting "ASUS graphics card".
+  - **Armoury Crate writes to the same lights.** With both running, whichever wrote last wins: close Armoury
+    Crate (tray icon too), or leave its lighting on a static look.
+  - Careful by design: only ASUS cards are looked at, only the lighting controller's address is used, and
+    nothing is written until the controller has identified itself with a known version.
+
 ## 1.11.1 — 2026-11-11
 
 - **Windows: "Update now" works from start to finish.** After the download, the step that runs the new setup

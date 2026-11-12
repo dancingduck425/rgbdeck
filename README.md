@@ -45,6 +45,7 @@ on physical devices** — they are marked *experimental*. If you own one, please
 | Logitech HID++ 2.0 keyboards | G512, G513, G810, G815, G910, G915/TKL, PRO… (keys discovered from the device; ANSI/ISO/JIS) | verified |
 | Glorious wireless mice | Model O / O- / D / D- Wireless, cable or dongle (all 3 onboard profiles, battery) | verified |
 | ASUS Aura USB mainboards | 0b05:19af and relatives (direct color + onboard effects) | verified |
+| ASUS graphics cards (NVIDIA) | ROG Strix / TUF / KO cards of the RTX 30, 40 and 50 series: every light on the card, per-light colors and the card's own effects. Reached through the NVIDIA driver on Windows (nothing to install), `/dev/i2c-*` on Linux (`i2c-dev` module and access to that file). Close Armoury Crate's lighting, or it overwrites the colors | experimental |
 | Razer Chroma | 182 keyboards, Blade laptops, mice, mousepads, keypads, headsets, accessories; paired devices through receivers | experimental |
 | Logitech mice & headsets | G203/G303/G403/G502/G703/G900/G903/G Pro families, G633/G635/G733/G933/G935; Lightspeed, Powerplay and Unifying receivers | experimental |
 | Corsair peripherals | K55/K65/K68/K70/K95/Strafe, M65/Scimitar/Glaive/Harpoon/Ironclaw/Nightsword/Dark Core, MM800, ST100, and the newer iCUE "V2" keyboards/mice/mousemats | experimental |
@@ -197,6 +198,7 @@ the same keyboard confuse each other.
 |---|---|
 | "Found devices but can't access them" | Install the udev rule once, then unplug/replug: `sudo install -m644 rgbdeck/data/70-rgbdeck.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger` |
 | Windows: "can't access" / nothing changes | Another program owns the device. Quit the vendor software (G HUB, Armoury Crate, Glorious Core, iCUE, Synapse…) including its tray icon, then **File → Rescan devices**. |
+| ASUS graphics card not listed | Needs an ASUS card with an NVIDIA chip and the NVIDIA driver installed. `rgbdeck.log` has a line starting "ASUS graphics card" that says what was found on the card and why it was left alone; send that line in an issue. |
 | Device not listed | Only families in the table above are detected. Close any other program that talks to the device (vendor software, OpenRGB…) — two controllers confuse the hardware. Then **File → Rescan devices**. |
 | Glorious mouse ignores colors | Its lighting is stored per onboard profile (1–3) and most tools only write profile 1. RGB Deck writes all three; if it still ignores you, press the profile button once. While on its cable the mouse still shows your colors — a solid color after charging is just the profile it is on. |
 | Govee light not found | Switch on **LAN Control** for it in the Govee Home app, same network as the PC, and let incoming UDP 4002 through the firewall — or add its address in **Settings → Network lights**. Another program on this PC that listens on that port (Govee Desktop, Home Assistant) also takes the answers away. |

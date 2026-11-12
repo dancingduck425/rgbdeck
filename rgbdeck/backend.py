@@ -34,6 +34,7 @@ FROZEN_DRIVER_MODULES = (
     "logitech_hidpp",
     "glorious_gmow",
     "asus_aura_usb",
+    "asus_gpu",
     "razer",
     "logitech_mouse",
     "corsair_peripheral",

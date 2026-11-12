@@ -117,6 +117,12 @@ for n in (1, 8, 11, 12, 24, 60):
     check(layout.kind == "mainboard", f"mainboard with {n} lights: drawn as a board")
     sound(layout, d, f"mainboard {n}")
 
+for n in (1, 4, 13, 22, 32):
+    d = dev("GPU", [("Graphics card", LINEAR if n > 1 else SINGLE, n)])
+    layout = build_geometry(d)
+    check(layout.kind == "gpu", f"graphics card with {n} lights: drawn as a card")
+    sound(layout, d, f"graphics card {n}")
+
 d = dev("Headset", [("Left", SINGLE, 1), ("Right", SINGLE, 1)])
 layout = build_geometry(d)
 sound(layout, d, "headset")
@@ -149,7 +155,7 @@ d = dev("Mouse", [])
 check(list(build_geometry(d)) == [], "a mouse without lights of its own has nothing to paint on")
 
 # outlines for devices without separate lights
-for kind in ("Mouse", "Headset", "Mousemat", "Motherboard", "LED Strip", "Light"):
+for kind in ("Mouse", "Headset", "Mousemat", "Motherboard", "GPU", "LED Strip", "Light"):
     g = device_shapes.glyph(kind)
     check(g is not None and any(s[-1] == "body" for s in g.backdrop), f"outline for a {kind} without separate lights")
 check(device_shapes.glyph("Speaker") is None, "no outline for types without a picture (plain block)")
