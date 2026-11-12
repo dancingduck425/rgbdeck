@@ -109,9 +109,11 @@ def _open(url: str, timeout: float):
 
     if not _trusted(url):
         raise UpdateError(f"refusing to fetch {url}: not this project's GitHub repository")
-    req = urllib.request.Request(
-        url, headers={"User-Agent": f"rgbdeck/{__version__}", "Accept": "application/vnd.github+json"}
-    )
+    headers = {"User-Agent": f"rgbdeck/{__version__}", "Accept": "application/vnd.github+json"}
+    token = os.environ.get("RGBDECK_GITHUB_TOKEN")  # build machines share addresses and run into GitHub's limit
+    if token and url.startswith("https://api.github.com/"):
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
     return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310 - https, host checked above
 
 
@@ -350,9 +352,47 @@ def _prepare_setup(release: Release, exe: Path, progress: Progress) -> List[str]
     setup = folder / asset.name
     download(asset.url, setup, asset.size, asset.sha256, progress)
     # Run the setup once this program has closed, then start the new version. Silent mode skips the
-    # "launch RGB Deck" step of the installer, hence the explicit start.
-    script = f'start "" /wait "{setup}" /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS & start "" "{exe}"'
-    return ["cmd.exe", "/c", script]
+    # "launch RGB Deck" step of the installer, hence the explicit start. The steps live in a file of their own:
+    # handing cmd.exe a line with quoted paths inside goes wrong, because Python escapes those quotes in a way
+    # cmd does not understand.
+    script = folder / "finish-update.cmd"
+    write_setup_steps(script, setup, exe)
+    return ["cmd.exe", "/c", str(script)]
+
+
+def write_setup_steps(script: Path, setup: Path, exe: Path):
+    lines = [
+        "@echo off",
+        "chcp 65001 >nul",
+        "ping -n 3 127.0.0.1 >nul",  # two seconds for the old program to finish closing
+        f'start "" /wait "{setup}" /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS',
+        f'start "" "{exe}"',
+    ]
+    script.write_text("\r\n".join(line.replace("%", "%%") for line in lines) + "\r\n", encoding="utf-8")
+
+
+def start_after_exit(command: List[str]):
+    """Run what apply() returned, from a program that is about to end: the new version must not inherit anything
+    that ties it to this one. A one-file Windows build unpacks itself into a temporary folder and tells its own
+    child processes about it through the environment; a program started with those variables would look for its
+    files in a folder that is deleted a moment later."""
+    drop = ("RGBDECK_PRETEND_VERSION", "RGBDECK_UPDATE_TEST", "_MEIPASS2")
+    env = {k: v for k, v in os.environ.items() if k not in drop and not k.startswith("_PYI_")}
+    if sys.platform != "win32":
+        subprocess.Popen(command, env=env, start_new_session=True, close_fds=True)
+        return
+    if getattr(sys, "frozen", False):
+        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetDllDirectoryW(None)  # the DLL search folder is inherited as well
+        except Exception:  # noqa: BLE001
+            pass
+    quiet = subprocess.DEVNULL
+    subprocess.Popen(  # no console window, own process group
+        command, env=env, creationflags=0x08000000 | 0x00000200, close_fds=True, stdin=quiet, stdout=quiet, stderr=quiet
+    )
 
 
 def apply(

@@ -11,6 +11,7 @@ import sys
 import tarfile
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -268,13 +269,30 @@ except updater.UpdateError:
     )
 FILES["/dl/v2.0.0/RGBDeck.exe"] = exe_new
 cmd = updater.apply(rel, "windows-setup", exe=port / "RGBDeck.exe")
+steps = Path(cmd[2]).read_text(encoding="utf-8") if len(cmd) == 3 and Path(cmd[2]).exists() else ""
 check(
     cmd[:2] == ["cmd.exe", "/c"]
-    and "/SILENT" in cmd[2]
-    and "RGBDeck-Setup-2.0.0.exe" in cmd[2]
-    and str(port / "RGBDeck.exe") in cmd[2],
-    "setup: the verified installer runs after exit, then the app starts",
+    and '"' not in cmd[2]
+    and "/SILENT" in steps
+    and "RGBDeck-Setup-2.0.0.exe" in steps
+    and steps.index("/SILENT") < steps.index(f'start "" "{port / "RGBDeck.exe"}"'),
+    "setup: the verified installer runs after exit, then the app starts (steps in a file, no quotes for cmd)",
 )
+if sys.platform == "win32":  # the real thing with stand-ins: a folder with a space and a percent sign in its name
+    odd = Path(tempfile.mkdtemp(prefix="rgb deck 100% ")).resolve()
+    trace = odd / "trace.txt"
+    (odd / "setup.cmd").write_text(f'@echo setup %1>>"{trace}"\r\n@exit\r\n'.replace("100%", "100%%"))
+    (odd / "app.cmd").write_text(f'@echo app>>"{trace}"\r\n@exit\r\n'.replace("100%", "100%%"))
+    script = odd / "finish.cmd"
+    updater.write_setup_steps(script, odd / "setup.cmd", odd / "app.cmd")
+    os.environ["_PYI_TEST_LEFTOVER"] = "1"
+    updater.start_after_exit(["cmd.exe", "/c", str(script)])
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline and (not trace.exists() or "app" not in trace.read_text()):
+        time.sleep(0.2)
+    seen = trace.read_text().split() if trace.exists() else []
+    print("     ", seen)
+    check(seen[:3] == ["setup", "/SILENT", "app"], "Windows runs the steps file: setup first, waited for, then the app")
 try:
     updater.apply(updater.parse_releases(API_DATA[3:4], "1.0"), "windows-setup", exe=port / "RGBDeck.exe")
     check(False, "missing asset")

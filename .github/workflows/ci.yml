@@ -87,6 +87,15 @@ jobs:
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} packaging\windows\rgbdeck.iss
           Get-ChildItem dist
+      - name: Update window, start to finish
+        # not on a release tag: its own downloads are not attached yet, so there is nothing to update to
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          RGBDECK_GITHUB_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist\RGBDeck-Setup-*.exe)[0].FullName
+          python tests\e2e_windows_update.py $setup dist\RGBDeck.exe
       - uses: actions/upload-artifact@v4
         with:
           name: RGBDeck-windows-${{ steps.ver.outputs.version }}

@@ -2118,6 +2118,11 @@ class UpdateDialog(QDialog):
         lay.addLayout(row)
         self.progressed.connect(self._progress)
         self.applied.connect(self._applied)
+        auto = {"update": self.update_btn, "later": self.later_btn, "skip": self.skip_btn}.get(
+            os.environ.get("RGBDECK_UPDATE_TEST", "")
+        )
+        if auto is not None:  # the build machine presses a button itself to try the whole way through
+            QTimer.singleShot(2000, auto.click)
 
     def _close_with(self, choice: str):
         self.choice = choice
@@ -4397,6 +4402,7 @@ class MainWindow(QMainWindow):
         self._keep_look_on_close()
         self.client.wait_idle(4.0)
         super().closeEvent(e)
+        QTimer.singleShot(0, QApplication.instance().quit)
 
     def _keep_look_on_close(self):
         """Make the current look outlive the app: store it in each device's memory where the hardware can, and
@@ -4688,6 +4694,9 @@ def main(argv: List[str]) -> int:
     app = QApplication([a for a in argv if a not in ("--tray", "--verbose", "-v")])
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName("rgbdeck")
+    # The window may be hidden in the tray while a dialog (the update offer) is open: closing that dialog must not
+    # count as "the last window was closed" and end the program. MainWindow.closeEvent quits when it means it.
+    app.setQuitOnLastWindowClosed(False)
     apply_theme(app)
     icon_path = app_icon_path()
     if icon_path:
@@ -4705,12 +4714,8 @@ def main(argv: List[str]) -> int:
         forget_control_file()
     if RESTART_COMMAND:  # an update was installed: start the new version now that this one is out of the way
         log.info("restarting after the update: %s", RESTART_COMMAND[0])
-        env = {k: v for k, v in os.environ.items() if k != "RGBDECK_PRETEND_VERSION"}
         try:
-            if IS_WINDOWS:
-                subprocess.Popen(RESTART_COMMAND, env=env, creationflags=0x00000008 | 0x08000000, close_fds=True)
-            else:
-                subprocess.Popen(RESTART_COMMAND, env=env, start_new_session=True, close_fds=True)
+            updater.start_after_exit(RESTART_COMMAND)
         except OSError as e:
             log.error("could not restart: %s", e)
     return rc
