@@ -112,6 +112,7 @@ With RGB Deck running (the tray is enough), these talk to it:
 
 | Command | Does |
 |---|---|
+| `rgbdeck --quit` | End the running program (the look is kept, as with Quit) |
 | `rgbdeck --toggle` / `--off` / `--on` | All lights off, and back to exactly what they showed |
 | `rgbdeck --brightness 60` / `+10` / `-10` | Overall brightness on top of every look |
 | `rgbdeck --preset NAME` / `--next-preset` | Apply a preset / step through them |
@@ -198,6 +199,7 @@ the same keyboard confuse each other.
 |---|---|
 | "Found devices but can't access them" | Install the udev rule once, then unplug/replug: `sudo install -m644 rgbdeck/data/70-rgbdeck.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger` |
 | Windows: "can't access" / nothing changes | Another program owns the device. Quit the vendor software (G HUB, Armoury Crate, Glorious Core, iCUE, Synapse…) including its tray icon, then **File → Rescan devices**. |
+| Windows: no devices show up, or the program closes by itself | First check **Help → About**: versions up to 1.11.0 cannot update themselves on Windows, so an old copy may still be installed; run the newest `RGBDeck-Setup-x.exe` from the release page once. If it still happens, **Help → Save a problem report** puts one text file on your desktop: attach it to an issue. |
 | ASUS graphics card not listed | Needs an ASUS card with an NVIDIA chip and the NVIDIA driver installed. `rgbdeck.log` has a line starting "ASUS graphics card" that says what was found on the card and why it was left alone; send that line in an issue. |
 | Device not listed | Only families in the table above are detected. Close any other program that talks to the device (vendor software, OpenRGB…) — two controllers confuse the hardware. Then **File → Rescan devices**. |
 | Glorious mouse ignores colors | Its lighting is stored per onboard profile (1–3) and most tools only write profile 1. RGB Deck writes all three; if it still ignores you, press the profile button once. While on its cable the mouse still shows your colors — a solid color after charging is just the profile it is on. |

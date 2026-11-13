@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.12.1 — 2026-11-12
+
+Found in the log of a Windows PC where no devices showed up and the program "crashed a lot". What the log
+showed, and what is different now:
+
+- **Your devices show up even when one part of the search hangs.** The search for devices ran as one piece:
+  while any driver was still waiting (there, something after the Govee lights), the window stayed empty. Now
+  keyboard, mouse and mainboard appear as soon as they are found and can be used at once; lights on the
+  network or over Bluetooth, and graphics cards, join when they have answered. Every driver has a time limit;
+  one that runs over is skipped, and the log says which one and where it was stuck.
+- **Closing the window ends the program, always.** Closing while that search was still running left an
+  invisible RGB Deck behind that kept hold of the devices, so the next start found them taken. The search now
+  stops when you close, and a program that has decided to end is cut off after 20 seconds if something still
+  will not let go. Logging off or shutting down ends it the way Quit does.
+- **One RGB Deck at a time.** Two copies talking to the same keyboard read each other's answers: devices go
+  missing in one of them and each undoes the other's colors. That could happen when the program was started
+  twice quickly, or at login, when the tray copy and "apply my preset" start side by side. Now the first one
+  gets the devices and the second hands its job over. A copy that holds the devices but no longer answers is
+  ended and replaced by the next start, instead of being joined by a second one.
+- **A device RGB Deck did not touch is not overwritten on close.** "Keep the look when closing" stored what the
+  program believed each device showed. For a device nothing had been sent to (and that cannot be read back,
+  like most mainboards) that belief was "black", so its lights were switched off and saved that way. Such
+  devices are now left alone and keep their entry in "Last look".
+- **A search that finds nothing looks again** after 5, 15 and 45 seconds (at login a device can still be busy
+  starting up), and opening the window from the tray with no devices in it starts a search too.
+- **A rescan keeps your look.** When a device was plugged in while an animation or dimming was active, the
+  other devices could take the last animation frame for their own colors.
+- **Presets asked for during the search are applied when it ends** instead of reaching no device.
+- Windows: checking for newly plugged-in devices no longer runs on the window's own thread (it made the window
+  hitch every two seconds on PCs with many USB devices).
+- **When something does go wrong, it leaves a trace.** A crash inside a library is written down with the place
+  it happened, errors nobody handled go to the log, and a start after a run that did not end properly says
+  so. **Help → Save a problem report** writes one text file (version, devices, settings, end of the log) to
+  the desktop to send along. The log now starts each run with the version and keeps one older file instead of
+  growing for ever.
+- `rgbdeck --quit` ends the running program.
+- The Windows build tries all of this on every change: start, second start, two starts at once, tray copy
+  plus preset at once, a frozen copy being replaced, and Quit leaving nothing behind.
+
+**If your installed version is 1.11.0 or older, its "Update now" cannot install this** (see 1.11.1): download
+`RGBDeck-Setup-1.12.1.exe` from the release page and run it once.
+
 ## 1.12.0 — 2026-11-12
 
 - **ASUS graphics cards light up too** (ROG Strix, TUF and KO cards with an NVIDIA chip, RTX 30, 40 and 50
