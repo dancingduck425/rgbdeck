@@ -117,8 +117,13 @@ TRAY_AUTOSTART_FILE = _config_root() / "autostart" / "rgbdeck.desktop"  # Linux;
 
 
 def setup_logging(verbose: bool):
+    from logging.handlers import RotatingFileHandler
+
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    handlers = [logging.FileHandler(LOG_FILE)]
+    # one older file is kept next to it (rgbdeck.log.1), so the log neither grows for ever nor loses last week
+    handlers: List[logging.Handler] = [
+        RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=1, encoding="utf-8", errors="replace")
+    ]
     if verbose and sys.stderr is not None:  # a windowed Windows build has no console
         handlers.append(logging.StreamHandler())
     logging.basicConfig(
@@ -131,7 +136,7 @@ def setup_logging(verbose: bool):
 from rgbdeck.keyboard_layout import KeyGeom, Layout, build_geometry, effect_positions  # noqa: E402
 from rgbdeck import device_shapes  # noqa: E402
 from rgbdeck.hw import govee_lan, wled  # noqa: E402
-from rgbdeck import animations, audio, automation, remote, sensors, updater  # noqa: E402
+from rgbdeck import animations, audio, automation, diagnostics, instance, remote, sensors, updater  # noqa: E402
 from rgbdeck.director import Director  # noqa: E402
 from rgbdeck.effects import (  # noqa: E402
     EffectEngine,
@@ -147,9 +152,17 @@ PRESETS_FILE = CONFIG_DIR / "presets.json"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 AUTOSTART_FILE = _config_root() / "autostart" / "rgbdeck-apply.desktop"  # Linux; Windows uses the registry
 CONTROL_FILE = CONFIG_DIR / "control.json"  # Windows: port + token of the running instance
+LOCK_FILE = CONFIG_DIR / "instance.lock"  # held by the one process that drives the devices (see instance.py)
+START_GRACE = 12.0  # a copy that holds the devices gets this long to answer before it counts as stuck
+APPLY_GRACE = 20.0  # ... one that is applying a preset without a window this long to finish by itself
+EFFECT_GRACE = 1.0  # ... and one that plays an effect without a window makes way for whoever comes next
+DEVICE_LOCK: Optional["instance.InstanceLock"] = None  # this process's claim on the devices, once it has one
+EXIT_GUARD = False  # main() turns it on: a real run must never linger once its window has closed
+EXIT_LIMIT = 20.0
 
 ACCENT = "#7c6cff"
 LAST_LOOK = "Last look"  # preset written on close so a per-key layout comes back at login
+SCAN_RETRY_AFTER = (5, 15, 45)  # seconds: a scan that found nothing, or not everything, is repeated this often
 # One running instance per user. Linux: an abstract unix socket. Windows (no AF_UNIX in Python): a loopback
 # TCP port, published with a random token in CONTROL_FILE so only this user's processes can drive it.
 CONTROL_SOCKET = "\0rgbdeck-" + (str(os.getuid()) if hasattr(os, "getuid") else os.environ.get("USERNAME", ""))
@@ -215,6 +228,74 @@ def control_listen() -> Optional[socket.socket]:
     sk.listen(4)
     sk.setblocking(False)
     return sk
+
+
+def claim_devices(lock: "instance.InstanceLock", mode: str, command: str) -> Optional[str]:
+    """Make this process the one RGB Deck that drives the devices.
+
+    Returns None once it is. If another copy holds them and answers, that copy gets `command` and its reply is
+    returned. A copy that holds them without answering is given time (it may still be starting, or be busy
+    closing); after that it is stuck, and it is ended so this one can take over."""
+    global DEVICE_LOCK
+    if lock.acquire(mode):
+        DEVICE_LOCK = lock
+        return None
+    started = time.monotonic()
+    owner: dict = {}
+    while True:
+        reply = send_control(command)
+        if reply is not None:
+            return reply
+        if lock.acquire(mode):
+            DEVICE_LOCK = lock
+            return None
+        owner = lock.owner()
+        grace = {"apply": APPLY_GRACE, "effect": EFFECT_GRACE}.get(owner.get("mode"), START_GRACE)
+        if time.monotonic() - started >= grace:
+            break
+        time.sleep(0.3)
+    pid = int(owner.get("pid") or 0)
+    if not logging.getLogger().handlers:
+        setup_logging(False)
+    if instance.is_rgbdeck(pid):
+        if owner.get("mode") == "effect":
+            log.info("a copy of RGB Deck (process %d) is playing an effect without a window: taking over", pid)
+        else:
+            log.warning("another copy of RGB Deck (process %d) holds the devices and is not answering: ending it", pid)
+        instance.end_process(pid)
+    else:
+        log.warning("the devices are held by process %s, which does not look like RGB Deck", pid or "?")
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if lock.acquire(mode):
+            DEVICE_LOCK = lock
+            return None
+        time.sleep(0.1)
+    log.warning("could not take over the devices; starting anyway")
+    return None
+
+
+def arm_exit_guard(limit: Optional[float] = None, code: int = 0):
+    """The program has decided to end: make sure it does. A driver stuck in a device, a network call that never
+    returns or a library that will not shut down would otherwise keep a window-less process around that still
+    holds the devices, and the next start would find them taken."""
+    if not EXIT_GUARD:
+        return
+
+    def force():
+        try:
+            log.error("still running %.0f s after closing: ending the process the hard way", limit or EXIT_LIMIT)
+            if RESTART_COMMAND:
+                updater.start_after_exit(RESTART_COMMAND)
+            forget_control_file()
+            logging.shutdown()
+        finally:
+            os._exit(code)
+
+    t = threading.Timer(limit or EXIT_LIMIT, force)
+    t.daemon = True
+    t.name = "rgbdeck-exit-guard"
+    t.start()
 
 
 def launch_command() -> List[str]:
@@ -512,7 +593,7 @@ class Swatch(QToolButton):
 
     def _apply(self):
         self.setStyleSheet(
-            f"QToolButton{{background:{self._color.name()};border:2px solid #0000;border-radius:7px;padding:0;}}"
+            f"QToolButton{{background:{self._color.name()};border:2px solid transparent;border-radius:7px;padding:0;}}"
             f"QToolButton:hover{{border:2px solid #fff;}}"
         )
         self.setToolTip(self._color.name().upper())
@@ -2643,6 +2724,8 @@ class _AutomationHost:
 
 class MainWindow(QMainWindow):
     scanFinished = Signal()
+    scanProgress = Signal()  # the USB devices are in, lights on the network are still being looked for
+    presenceChecked = Signal(bool)
     hotkeyPressed = Signal(str)
     updateChecked = Signal(object, str, bool)  # release (or None), error text, asked for by hand
     batteryRead = Signal(str, object)
@@ -2653,7 +2736,15 @@ class MainWindow(QMainWindow):
         self._scanning = False
         self._scan_error = ""
         self._scan_resume_fx = None
+        self._scan_shown: Optional[List[Device]] = None  # devices of the running scan that are on screen already
+        self._scan_again = False  # somebody asked for a scan while one was running
+        self._scan_retries = 0
+        self._apply_after_scan: Optional[str] = None  # preset asked for while a scan was running
+        self._presence_asking = False
+        self.previous_run_note = ""  # set by main(): what went wrong last time, if anything
         self.scanFinished.connect(self._scan_done)
+        self.scanProgress.connect(self._scan_partial)
+        self.presenceChecked.connect(self._presence_arrived)
         self.setWindowTitle(APP_NAME)
         self.resize(1440, 860)
         self.settings = load_json(SETTINGS_FILE, {})
@@ -3006,6 +3097,10 @@ class MainWindow(QMainWindow):
         h.addAction(a)
         a = QAction("Open log file", self)
         a.triggered.connect(lambda: open_in_desktop(LOG_FILE))
+        h.addAction(a)
+        a = QAction("Save a problem report…", self)
+        a.setToolTip("One text file with everything needed to look into a problem, to send along")
+        a.triggered.connect(self._save_report)
         h.addAction(a)
         a = QAction("Check for updates…", self)
         a.triggered.connect(lambda: self._check_updates(True))
@@ -3936,9 +4031,18 @@ class MainWindow(QMainWindow):
     def start_scan(self):
         """Probe devices on a background thread so the window stays responsive (some probes take seconds)."""
         if self._scanning:
+            self._scan_again = True  # e.g. a light was added while a scan was running: look once more after it
             return
         self._scanning = True
+        self._scan_shown = None
+        self._scan_again = False
         self._scan_error = ""
+        # what every device is meant to show (not the frame an animation or the dimmer sent last) and how far
+        # it is dimmed: devices that are still there after the scan carry on exactly as they were
+        self._scan_keep = {
+            (d.name, d.location): (list(self.base_colors.get(d.index, d.colors)), self.dim.get(d.index, 100))
+            for d in self.client.devices
+        }
         if self.engine and self.engine_dev:
             self._scan_resume_fx = (self.engine_dev.name, self.engine_kind, self.engine.settings)
             self._stop_app_effect()
@@ -3946,28 +4050,59 @@ class MainWindow(QMainWindow):
         threading.Thread(target=self._scan_worker, name="rgbdeck-scan", daemon=True).start()
 
     def _scan_worker(self):
+        def progress():
+            try:
+                self.scanProgress.emit()
+            except RuntimeError:
+                pass  # the window is gone
+
         try:
-            self.client.refresh()
+            self.client.refresh(progress=progress)
         except Exception as e:  # noqa: BLE001 - report, never crash the UI
             log.exception("device scan failed")
             self._scan_error = str(e)
-        self.scanFinished.emit()
+        try:
+            self.scanFinished.emit()
+        except RuntimeError:
+            pass
+
+    def _scan_partial(self):
+        """Keyboard, mouse and the like are found: show them now. Lights that have to answer over the network
+        or Bluetooth are still being looked for and join when the scan ends."""
+        if self._scanning:
+            self._scan_show(final=False)
 
     def _scan_done(self):
+        self._scan_show(final=True)
+
+    def _scan_show(self, final: bool):
+        devices = list(self.client.devices)
+        if self._scan_shown is None:  # nothing of this scan is on screen yet: start from a clean slate
+            self._follow_last.clear()
+            self.base_colors, self.dim = {}, {}
+            self._adopt_looks(devices)
+            self._populate_devices()
+            self.director.forget()
+            self._anim_pos.clear()
+            self._anim_last.clear()
+            self._anim_parked.clear()
+            self._sync_status_devices()
+            self._anim_touched.clear()
+        else:  # the first part is in use already: only add what came after it
+            known = {id(d) for d in self._scan_shown}
+            if any(id(d) not in known for d in devices) or len(devices) != len(self.tabs):
+                self._adopt_looks(devices)
+                self._populate_devices()
+                self._sync_status_devices()
+        if not final:
+            self._scan_shown = devices
+            self.statusBar().showMessage(f"{len(devices)} device(s) · still looking for lights on the network…")
+            return
         self._scanning = False
-        self._follow_last.clear()
-        self.base_colors = {d.index: list(d.colors) for d in self.client.devices}
-        self.dim = {d.index: self.dim.get(d.index, 100) for d in self.client.devices}
-        self._populate_devices()
+        self._scan_shown = None
         if self._update_startup_pending:
             self._update_startup_pending = False
             QTimer.singleShot(1500, self._startup_update_check)  # devices first, then the question to GitHub
-        self.director.forget()
-        self._anim_pos.clear()
-        self._anim_last.clear()
-        self._anim_parked.clear()
-        self._sync_status_devices()
-        self._anim_touched.clear()
         if self._anim_resume:
             self._anim_resume = False
             saved = self.settings.get("animation") or {}
@@ -3997,6 +4132,41 @@ class MainWindow(QMainWindow):
                 )
         elif err:
             self.statusBar().showMessage(f"{len(self.client.devices)} device(s) · some failed: {err}", 8000)
+        pending, self._apply_after_scan = self._apply_after_scan, None
+        if pending and pending in self.presets and self.client.devices:
+            self._apply_preset(pending)
+        if self.previous_run_note:
+            if "\n" in self.previous_run_note:  # there is a crash trace: worth pointing at
+                self.statusBar().showMessage(
+                    "RGB Deck crashed last time. Help → Save a problem report collects what is known about it.", 30000
+                )
+            self.previous_run_note = ""
+        if self._scan_again:
+            QTimer.singleShot(0, self.start_scan)
+        elif (not self.client.devices or err) and self._scan_retries < len(SCAN_RETRY_AFTER):
+            # Right after login a device may still be busy with its own start-up, or held by a program that is
+            # just starting too. Looking again a few times costs nothing; giving up after one look cost the
+            # whole session.
+            delay = SCAN_RETRY_AFTER[self._scan_retries]
+            self._scan_retries += 1
+            log.info(
+                "scan found %d device(s)%s; looking again in %d s", len(devices), " with problems" if err else "", delay
+            )
+            QTimer.singleShot(delay * 1000, self._retry_scan)
+
+    def _adopt_looks(self, devices: List[Device]):
+        """Base colors and dimming for devices a scan has just handed over."""
+        keep = getattr(self, "_scan_keep", {})
+        for d in devices:
+            if d.index in self.base_colors:
+                continue
+            base, dim = keep.get((d.name, d.location), (None, 100))
+            self.base_colors[d.index] = base if base is not None and len(base) == len(d.colors) else list(d.colors)
+            self.dim[d.index] = dim
+
+    def _retry_scan(self):
+        if not self._scanning and (not self.client.devices or self.client.last_error):
+            self.start_scan()
 
     def _poll_server(self):
         if self._scanning:
@@ -4007,11 +4177,27 @@ class MainWindow(QMainWindow):
             if "gone" in err or "did not answer" in err:
                 self._try_reconnect()
             return
-        try:
-            if self.client.poll_notifications():
-                self._rescan()
-        except DeviceError:
-            self._try_reconnect()
+        if self._presence_asking:
+            return
+        self._presence_asking = True
+
+        def work():  # listing the USB devices takes Windows a noticeable moment: not on the window's thread
+            try:
+                changed = self.client.poll_notifications()
+            except Exception:  # noqa: BLE001
+                log.exception("presence check failed")
+                changed = False
+            try:
+                self.presenceChecked.emit(changed)
+            except RuntimeError:
+                pass  # the window is gone
+
+        threading.Thread(target=work, name="rgbdeck-presence", daemon=True).start()
+
+    def _presence_arrived(self, changed: bool):
+        self._presence_asking = False
+        if changed and not self._scanning:
+            self._rescan()
 
     def _try_reconnect(self):
         self.statusBar().showMessage("A device stopped answering — looking again…")
@@ -4078,6 +4264,24 @@ class MainWindow(QMainWindow):
             + f"<b>Logs</b><br>{LOG_FILE} (run <code>rgbdeck --verbose</code> for more detail).",
         )
 
+    def _save_report(self):
+        target = diagnostics.report_target()
+        try:
+            text = diagnostics.report_text(__version__, CONFIG_DIR, LOG_FILE, self.client, self.settings)
+            target.write_text(text, encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(self, "Problem report", f"The report could not be written:\n{e}")
+            return
+        log.info("problem report written to %s", target)
+        QMessageBox.information(
+            self,
+            "Problem report",
+            f"Saved as<br><b>{target}</b><br><br>Send this file along when you report a problem. It holds the "
+            "program version, your devices, your settings and the end of the log: no passwords, but the names "
+            "and network addresses of your lights.",
+        )
+        open_in_desktop(target)
+
     def _show_about(self):
         QMessageBox.about(
             self,
@@ -4137,11 +4341,16 @@ class MainWindow(QMainWindow):
                     return
             cmd, _, arg = line.partition(" ")
             if cmd == "apply":
-                if arg in self.presets:
-                    self._apply_preset(arg)
+                if arg not in self.presets:
+                    reply = f"no preset named {arg!r}"
+                elif self._scanning:
+                    # At login this arrives while the devices are still being found: applying it now would
+                    # reach none of them, or only the first few.
+                    self._apply_after_scan = arg
                     reply = f"applied {arg}"
                 else:
-                    reply = f"no preset named {arg!r}"
+                    self._apply_preset(arg)
+                    reply = f"applied {arg}"
             elif cmd == "show":
                 self._show_from_tray()
                 reply = "ok"
@@ -4149,6 +4358,9 @@ class MainWindow(QMainWindow):
                 reply = self.director.command(arg)
                 if self.dev:
                     self._select_device(self.dev.index)
+            elif cmd == "quit":
+                QTimer.singleShot(0, self._quit)
+                reply = "ok"
             elif cmd == "ping":
                 reply = "pong"
             else:
@@ -4357,6 +4569,8 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+        if not self.client.devices and not self._scanning:
+            self.start_scan()  # an empty window is the moment to look again, not to stay empty
 
     def _quit(self):
         self._really_quit = True
@@ -4387,6 +4601,11 @@ class MainWindow(QMainWindow):
                 self.settings["tray_hint_shown"] = True
                 save_json(SETTINGS_FILE, self.settings)
             return
+        if getattr(self, "_closing", False):  # asked to end twice (Quit and the session ending at once)
+            e.accept()
+            return
+        self._closing = True
+        arm_exit_guard()  # from here on the program is ending: nothing may keep it around
         self._stop_app_effect()
         self.automation.shutdown()
         if self.remote is not None:
@@ -4401,6 +4620,7 @@ class MainWindow(QMainWindow):
         self.tray.hide()
         self._keep_look_on_close()
         self.client.wait_idle(4.0)
+        diagnostics.end()  # this is a proper end, whatever the system does to the process from here on
         super().closeEvent(e)
         QTimer.singleShot(0, QApplication.instance().quit)
 
@@ -4409,10 +4629,19 @@ class MainWindow(QMainWindow):
         re-apply what it can't (multi-color key layouts) at login through the 'Last look' preset."""
         if not self.settings.get("keep_on_close", True) or not self.client.devices:
             return
+        if self._scanning and self._scan_shown is None:
+            return  # closed before the first devices were on screen: there is no look to keep yet
         needs_login = False
+        untouched = set()
         for d in self.client.devices:
             if getattr(self.client.driver_for(d), "keeps_state", False):
                 continue  # e.g. a network light: it remembers its own colour / scene / power
+            if not self.client.was_written(d):
+                # Nothing was sent to it in this session, so it still shows what it showed before, and the
+                # colors held for it here are a guess (all black for a device that cannot be read back).
+                # Storing that guess would switch its lights off for good.
+                untouched.add(d.name)
+                continue
             mode = d.current_mode
             try:
                 if mode.has_per_led:
@@ -4429,7 +4658,15 @@ class MainWindow(QMainWindow):
                     log.info("kept %s effect '%s' in device memory", d.name, mode.name)
             except DeviceError as e:
                 log.warning("could not store the look in %s: %s", d.name, e)
-        self.presets[LAST_LOOK] = self._snapshot()
+        look = self._snapshot()
+        if untouched:  # for those, the look remembered from the last time stays as it is
+            before = {e.get("name"): e for e in (self.presets.get(LAST_LOOK) or {}).get("devices", [])}
+            look["devices"] = [
+                before[e["name"]] if e["name"] in untouched and e["name"] in before else e
+                for e in look["devices"]
+                if e["name"] not in untouched or e["name"] in before
+            ]
+        self.presets[LAST_LOOK] = look
         save_json(PRESETS_FILE, self.presets)
         if needs_login and not self.settings.get("autostart_preset"):
             self._set_autostart(LAST_LOOK)
@@ -4484,6 +4721,8 @@ def run_headless_effect(client: LocalBackend, snap: dict) -> int:
         entry = entries.get(d.name)
         return list(entry["colors"]) if entry and entry.get("colors") else list(d.colors)
 
+    if DEVICE_LOCK is not None:
+        DEVICE_LOCK.note("effect")  # this goes on until something ends it: the program proper may take over
     engine = listener = fx_dev = None
     fps = 24
     if fx:
@@ -4649,9 +4888,16 @@ def main(argv: List[str]) -> int:
             print(f"no preset named {name!r}", file=sys.stderr)
             return 1
         handed = send_control(f"apply {name}")
+        if handed is None:
+            # nobody answers: either no RGB Deck is running, or one is just starting (both happen at login,
+            # where this and the tray copy are started side by side). Never two at the devices at once.
+            lock = instance.InstanceLock(LOCK_FILE)
+            handed = claim_devices(lock, "apply", f"apply {name}")
         if handed is not None:  # the GUI is running: let it do it (one controller per device)
             print(handed)
             return 0 if handed.startswith("applied") else 1
+        setup_logging("--verbose" in argv or "-v" in argv)
+        log.info("RGB Deck %s applying preset %r without a window", __version__, name)
         qt_core = QCoreApplication.instance() or QCoreApplication(argv[:1])  # Bluetooth lights need one
         c = LocalBackend()
         c.connect()
@@ -4661,6 +4907,7 @@ def main(argv: List[str]) -> int:
             return run_headless_effect(c, snap)
         c.shutdown()
         del qt_core
+        lock.release()
         return 0
     if "--list" in argv:
         for n in sorted(load_json(PRESETS_FILE, {})):
@@ -4679,13 +4926,28 @@ def main(argv: List[str]) -> int:
     if "--version" in argv:
         print(f"{APP_NAME} {__version__}")
         return 0
+    if "--quit" in argv:  # end the running program the way its own Quit does
+        return 0 if send_control("quit") == "ok" else 1
     if "--selftest" in argv:  # CI check of a bundled build: drivers discoverable, Qt + icon load, nothing else
         return selftest()
 
     if send_control("show") == "ok":  # already running: just raise that window
         return 0
+    lock = instance.InstanceLock(LOCK_FILE)
+    if claim_devices(lock, "window", "show") == "ok":  # one that was still starting has raised its window
+        return 0
     setup_logging("--verbose" in argv or "-v" in argv)
-    log.info("RGB Deck starting")
+    previous = diagnostics.begin(CONFIG_DIR, __version__)
+    import platform
+
+    log.info(
+        "RGB Deck starting: version %s on %s, %s",
+        __version__,
+        platform.platform(),
+        "packaged" if getattr(sys, "frozen", False) else "from source",
+    )
+    if previous:
+        log.warning("%s", previous)
     if sys.platform.startswith("linux") and not os.environ.get("RGBDECK_NATIVE_THEME"):
         # The desktop's own Qt theme plugin (KDE's loads Qt Quick, QML and three dozen framework libraries, GTK's
         # loads GTK) costs about 20 MB and gives this app nothing: it paints itself and has no file dialogs.
@@ -4701,17 +4963,39 @@ def main(argv: List[str]) -> int:
     icon_path = app_icon_path()
     if icon_path:
         app.setWindowIcon(QIcon(str(icon_path)))
+    diagnostics.watch_qt()
+    global EXIT_GUARD
+    EXIT_GUARD = True
     client = LocalBackend()
     w = MainWindow(client)
+    w.previous_run_note = previous
+
+    def end_with_session(*_):
+        # Logging off or shutting down: end like "Quit" does (the look is stored, nothing is left half-open)
+        # instead of hiding in the tray and being cut off.
+        w._quit()
+
+    app.commitDataRequest.connect(end_with_session)
+    if not IS_WINDOWS:
+        import signal
+
+        for name in ("SIGTERM", "SIGINT", "SIGHUP"):  # ended from outside: the same proper end
+            try:
+                signal.signal(getattr(signal, name), lambda *_: QTimer.singleShot(0, w._quit))
+            except (ValueError, OSError, AttributeError):
+                pass
     if "--tray" in argv and w.tray.isVisible():
         w.hide()
     else:
         w.show()
     w.start_scan()
     rc = app.exec()
+    arm_exit_guard(code=rc)
     client.shutdown()
     if w._ctl is not None:
         forget_control_file()
+    diagnostics.end()
+    lock.release()
     if RESTART_COMMAND:  # an update was installed: start the new version now that this one is out of the way
         log.info("restarting after the update: %s", RESTART_COMMAND[0])
         try:

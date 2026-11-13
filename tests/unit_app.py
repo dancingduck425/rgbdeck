@@ -558,6 +558,120 @@ check(
     "setting off -> devices and login entry untouched",
 )
 
+# ---- what a real Windows PC showed: closing before the scan had finished, and devices never written to ------
+# (its log: the scan did not come to an end, the window was closed, and the mainboard was stored as black)
+app_mod.set_autostart("apply", None)
+
+
+def fresh_backend(first, late):
+    usb = types.ModuleType("rgbdeck.hw.fakeusb")
+    usb.probe = lambda: first
+    usb.USB_IDS = [(1, 2)]
+    net = types.ModuleType("rgbdeck.hw.fakenet")
+    net.probe = late
+    net.USB_IDS = []
+    backend.discover_drivers = lambda: [usb, net]
+    return backend.LocalBackend()
+
+
+board = FakeDriver("Mainboard", ["Light"], kb_modes())  # cannot be read back: starts out as "black"
+keys = FakeDriver("Keys", ["Key: A", "Key: B"], kb_modes())
+lamp = FakeDriver("Lamp", ["Light"], kb_modes())
+import threading  # noqa: E402
+
+gate = threading.Event()
+
+
+def slow_lights():
+    gate.wait(10)
+    return [lamp]
+
+
+c3 = fresh_backend([keys, board], slow_lights)
+w3 = app_mod.MainWindow(c3)
+w3.settings.pop("autostart_preset", None)
+w3.settings["keep_on_close"] = True
+w3.presets[app_mod.LAST_LOOK] = {
+    "devices": [{"name": "Mainboard", "colors": [orange], "active_mode": 0, "modes": {}, "dim": 100}]
+}
+w3.start_scan()
+deadline = time.monotonic() + 5
+while w3._scan_shown is None and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
+check(
+    [t.dev.name for t in w3.tabs] == ["Keys", "Mainboard"] and w3._scanning,
+    f"USB devices are on screen while the lights are still being looked for ({[t.dev.name for t in w3.tabs]})",
+)
+w3.dev = c3.devices[0]
+c3.update_leds(c3.devices[0], [blue, blue])  # the user recolors the keyboard meanwhile; the board is not touched
+check(c3.wait_idle(2.0) and keys.writes[-1] == [blue, blue], "... and can be used at once")
+w3.base_colors[0] = [blue, blue]
+w3.start_scan()  # asked for again while it runs (a light was added): remembered, not dropped
+gate.set()
+deadline = time.monotonic() + 5
+while w3._scanning and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
+check([t.dev.name for t in w3.tabs] == ["Keys", "Mainboard", "Lamp"], "the lights join when they have answered")
+check(w3.base_colors[0] == [blue, blue], "what was set in between is still the look")
+deadline = time.monotonic() + 5
+again = False
+while time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
+    again = again or w3._scanning
+    if again and not w3._scanning:
+        break
+check(again and not w3._scanning, "a scan asked for during a scan runs afterwards")
+check(w3.base_colors[0] == [blue, blue], "a rescan keeps the look instead of taking the last frame for it")
+board.modes.clear()
+keys.modes.clear()
+w3._really_quit = True
+w3.close()
+c3.wait_idle()
+check(not board.modes, f"a device nothing was sent to is not stored on close ({board.modes})")
+check(keys.modes and keys.modes[-1] == ("Static", True, [blue]), f"the one that was set is ({keys.modes[-1:]})")
+kept = {e["name"]: e for e in app_mod.load_json(app_mod.PRESETS_FILE, {}).get(app_mod.LAST_LOOK, {}).get("devices", [])}
+check(
+    kept.get("Mainboard", {}).get("colors") == [orange] and kept.get("Keys", {}).get("colors") == [blue, blue],
+    f"'Last look' keeps the untouched device's earlier look ({kept.get('Mainboard', {}).get('colors')})",
+)
+c3.shutdown()
+
+# closed while the very first scan is still running: nothing is on screen, so nothing is stored anywhere
+gate.clear()
+board2 = FakeDriver("Mainboard", ["Light"], kb_modes())
+hold = threading.Event()
+
+
+def slow_net():
+    hold.wait(10)
+    return []
+
+
+c4 = fresh_backend([board2], slow_net)
+w4 = app_mod.MainWindow(c4)
+w4.settings["keep_on_close"] = True
+look_before = app_mod.load_json(app_mod.PRESETS_FILE, {}).get(app_mod.LAST_LOOK)
+w4.start_scan()
+deadline = time.monotonic() + 3
+while not c4.devices and time.monotonic() < deadline:
+    time.sleep(0.01)  # found by the scan, but the window has not been told yet
+check(len(c4.devices) == 1 and w4._scan_shown is None, "a device is found but not on screen yet")
+w4._really_quit = True
+t0 = time.monotonic()
+w4.close()
+c4.shutdown()
+check(time.monotonic() - t0 < 8.0, f"closing during a scan does not wait for the scan ({time.monotonic() - t0:.1f} s)")
+hold.set()
+check(not board2.modes, "closing before any device was shown writes nothing to the devices")
+check(
+    app_mod.load_json(app_mod.PRESETS_FILE, {}).get(app_mod.LAST_LOOK) == look_before,
+    "... and leaves 'Last look' alone",
+)
+backend.discover_drivers = lambda: [mod]
+
 # Windows control channel: a stale control.json pointing at some other program's port must not look like a
 # running RGB Deck (that would make the next start exit silently)
 import json  # noqa: E402

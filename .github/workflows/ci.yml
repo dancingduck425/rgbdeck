@@ -82,6 +82,9 @@ jobs:
           ./dist/RGBDeck.exe --selftest || rc=$?
           echo "--- log"; cat "$APPDATA/rgbdeck/rgbdeck.log"
           grep -q "selftest: OK" "$APPDATA/rgbdeck/rgbdeck.log" && [ "$rc" = 0 ]
+      - name: Start, second start, stuck copy, Quit
+        shell: pwsh
+        run: python tests\e2e_windows_start.py dist\RGBDeck.exe
       - name: Build installer
         shell: pwsh
         run: |
