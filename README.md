@@ -45,6 +45,7 @@ on physical devices** — they are marked *experimental*. If you own one, please
 | Logitech HID++ 2.0 keyboards | G512, G513, G810, G815, G910, G915/TKL, PRO… (keys discovered from the device; ANSI/ISO/JIS) | verified |
 | Glorious wireless mice | Model O / O- / D / D- Wireless, cable or dongle (all 3 onboard profiles, battery) | verified |
 | ASUS Aura USB mainboards | 0b05:19af and relatives (direct color + onboard effects) | verified |
+| ASUS ROG mice on the SpeedNova 8K receiver | ROG Harpe II Ace and Harpe II Extreme Edition 20, through the receiver (0b05:1ad0) or on the cable (0b05:1c69): the scroll wheel light in any color, the mouse's own effects (Static, Breathing, Spectrum Cycle, Reactive, Battery Level), battery level. A sleeping mouse gets its look when it wakes up | experimental |
 | ASUS graphics cards (NVIDIA) | ROG Strix / TUF / KO cards of the RTX 30, 40 and 50 series: every light on the card, per-light colors and the card's own effects. Reached through the NVIDIA driver on Windows (nothing to install), `/dev/i2c-*` on Linux (`i2c-dev` module and access to that file). Close Armoury Crate's lighting, or it overwrites the colors | experimental |
 | Razer Chroma | 182 keyboards, Blade laptops, mice, mousepads, keypads, headsets, accessories; paired devices through receivers | experimental |
 | Logitech mice & headsets | G203/G303/G403/G502/G703/G900/G903/G Pro families, G633/G635/G733/G933/G935; Lightspeed, Powerplay and Unifying receivers | experimental |
@@ -57,8 +58,8 @@ on physical devices** — they are marked *experimental*. If you own one, please
 | WLED controllers | Any ESP8266 / ESP32 running WLED: found by mDNS or added by address, per-LED colors over the UDP realtime protocol, on/off, hands back to WLED's own effect | experimental |
 | HyperX | Alloy Origins/60/65/Core/Elite/Elite 2/FPS, Pulsefire Surge/Core/FPS Pro/Dart/Raid/Haste, Fury Ultra & Pulsefire mats, QuadCast S/2 S, DuoCast | experimental |
 
-Not supported on purpose: RAM and GPU lighting (driven over I²C/SMBus, where a bad write can brick a module — not
-something to ship untested). Everything else: see [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a driver, or
+Not supported on purpose: RAM lighting, and graphics cards other than the ASUS ones above (driven over I²C/SMBus,
+where a bad write can brick a module — not something to ship untested). Everything else: see [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a driver, or
 open a device-support issue with your `lsusb` line.
 
 ### How devices are shown
@@ -201,6 +202,7 @@ the same keyboard confuse each other.
 | Windows: "can't access" / nothing changes | Another program owns the device. Quit the vendor software (G HUB, Armoury Crate, Glorious Core, iCUE, Synapse…) including its tray icon, then **File → Rescan devices**. |
 | Windows: no devices show up, or the program closes by itself | First check **Help → About**: versions up to 1.11.0 cannot update themselves on Windows, so an old copy may still be installed; run the newest `RGBDeck-Setup-x.exe` from the release page once. If it still happens, **Help → Save a problem report** puts one text file on your desktop: attach it to an issue. |
 | ASUS graphics card not listed | Needs an ASUS card with an NVIDIA chip and the NVIDIA driver installed. `rgbdeck.log` has a line starting "ASUS graphics card" that says what was found on the card and why it was left alone; send that line in an issue. |
+| ASUS ROG mouse shows up but the wheel does not change | The mouse is asleep or switched off: move it, and it takes the look within about ten seconds. If Armoury Crate is running it sets the wheel too and the last one to speak wins: switch the lighting off there or quit it. On its cable the mouse only answers when its switch is set to wired; otherwise the cable just charges and RGB Deck uses the receiver. |
 | Device not listed | Only families in the table above are detected. Close any other program that talks to the device (vendor software, OpenRGB…) — two controllers confuse the hardware. Then **File → Rescan devices**. |
 | Glorious mouse ignores colors | Its lighting is stored per onboard profile (1–3) and most tools only write profile 1. RGB Deck writes all three; if it still ignores you, press the profile button once. While on its cable the mouse still shows your colors — a solid color after charging is just the profile it is on. |
 | Govee light not found | Switch on **LAN Control** for it in the Govee Home app, same network as the PC, and let incoming UDP 4002 through the firewall — or add its address in **Settings → Network lights**. Another program on this PC that listens on that port (Govee Desktop, Home Assistant) also takes the answers away. |
@@ -252,4 +254,6 @@ guide; its per-model table (segment counts, scene codes) was compiled from
 [govee-local-api](https://github.com/Galorhallen/govee-local-api) (Apache-2.0). The Corsair Commander Duo driver was
 written from the protocol as documented by [OpenLinkHub](https://github.com/jurkovic-nikola/OpenLinkHub) and the
 [corsair-cduo](https://github.com/davemistretta/corsair-cduo-public) Linux driver's notes (packet formats only, no
+code). The ASUS ROG mouse driver follows the packets in [G-Helper](https://github.com/seerge/g-helper) (GPL-3.0) and
+the captures of ASUS's own software noted by [rogctl](https://github.com/Humblemonk/rogctl) (packet formats only, no
 code). RGB Deck does not use or depend on any of them at runtime.

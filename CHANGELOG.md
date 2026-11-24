@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.13.0 — 2026-11-23
+
+- **ASUS ROG mice on the SpeedNova 8K receiver** (experimental): the ROG Harpe II Ace and Harpe II Extreme
+  Edition 20, through their receiver or on their cable. The mouse shows up drawn as a mouse with its one light,
+  the scroll wheel. Paint it, let it follow *Sync all devices* and the animations, or pick one of the mouse's
+  own effects: Static, Breathing, Spectrum Cycle, Reactive (lights up on a click), Battery Level, Off. The
+  battery level is shown next to its name.
+  - Colors from the app are shown without being written into the mouse's memory, so an animation does not
+    wear it out. The memory is only written by **Save** and by "keep the look when closing", which stores
+    what the wheel shows at that moment.
+  - A mouse that is asleep or switched off is not an error. RGB Deck remembers the look and sends it when the
+    mouse answers again (it looks every ten seconds).
+  - At most twenty color changes a second go over the radio; the newest one always arrives.
+  - With the mouse set to its cable it is found there; while the cable only charges, the receiver is used.
+  - The packets are the ones ASUS's own software was captured sending to a Harpe II Ace, and the driver is
+    tested against a simulated mouse that answers the way the real one was captured answering, also in the
+    shape Windows presents the receiver in. It has not been run on a real mouse yet. If Armoury Crate is
+    running it sets the wheel too; switch its lighting off or quit it.
+- README: the list of what is left out on purpose no longer says "GPU lighting" (ASUS cards have been in since
+  1.12.0).
+
 ## 1.12.1 — 2026-11-12
 
 Found in the log of a Windows PC where no devices showed up and the program "crashed a lot". What the log

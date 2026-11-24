@@ -41,6 +41,7 @@ FROZEN_DRIVER_MODULES = (
     "glorious_gmow",
     "asus_aura_usb",
     "asus_gpu",
+    "asus_mouse",
     "razer",
     "logitech_mouse",
     "corsair_peripheral",
